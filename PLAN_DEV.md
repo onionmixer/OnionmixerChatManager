@@ -784,6 +784,7 @@ signals:
 
 6. 우측 액션 패널
 - 선택한 메시지의 플랫폼, 채널, 닉네임, 채널 ID, 역할, 배지 표시
+- 상단에 플랫폼 상태 사각형 인디케이터 2개(YouTube/치지직) 배치
 - 공통 액션 버튼 영역
 - 플랫폼 전용 액션 버튼 영역
 - 실행 전 확인 다이얼로그 및 결과 로그 표시
@@ -895,6 +896,77 @@ signals:
 - 네트워크 오류: `재시도` 버튼 활성화
 - 권한 오류/무효 토큰: `브라우저 재인증 필요` 배너 표시
 - 콜백 타임아웃: 인증 세션 폐기 후 재시작 안내
+
+### 8.3.5 액션 패널 상단 플랫폼 상태 사각형 인디케이터
+
+요구사항:
+
+- 메인 화면 우측 `Actions` 패널 상단에 상태 사각형 2개를 둔다.
+- 좌측 사각형은 `YouTube`, 우측 사각형은 `치지직`을 나타낸다.
+- 각 사각형은 플랫폼별 런타임 상태를 색상으로 표시한다.
+
+권장 위젯 구조:
+
+- `MainWindow` 우측 패널 최상단 `QHBoxLayout`
+  - `ytStatusBox(QFrame)` + `ytStatusLabel(QLabel: "YouTube")`
+  - `chzStatusBox(QFrame)` + `chzStatusLabel(QLabel: "CHZZK")`
+- 사각형 크기: `16x16` 또는 `18x18`
+- 스타일: `border-radius: 2px; border: 1px solid #666;`
+
+색상 정책:
+
+| 상태 | 의미 | 색상(권장) |
+|---|---|---|
+| `AUTH_IN_PROGRESS` | Configuration에서 브라우저 인증 진행 중 | `#FFB74D` (주황) |
+| `ONLINE` | 플랫폼 연결 활성(채팅 수신 가능) | `#81D4FA` (하늘색) |
+| `TOKEN_OK` | 토큰 상태 정상(연결 전/미연결) | `#66BB6A` (초록) |
+| `TOKEN_BAD` | 토큰 상태 비정상/인증 필요/오류 | `#EF5350` (빨강) |
+
+상태 우선순위(상위가 우선):
+
+1. `AUTH_IN_PROGRESS`
+2. `ONLINE`
+3. `TOKEN_OK` / `TOKEN_BAD`
+
+토큰 정상 판정 기준:
+
+- `TOKEN_OK`: `VALID`, `EXPIRING_SOON`
+- `TOKEN_BAD`: `NO_TOKEN`, `EXPIRED`, `AUTH_REQUIRED`, `ERROR`
+- `REFRESHING`은 운영 정책상 비정상으로 보지 않고 별도 색상으로 분리할 수 있으나, MVP에서는 `TOKEN_BAD`로 단순화해도 무방하다.
+
+시그널-슬롯/업데이트 트리거:
+
+- 연결 상태 변화:
+  - `onConnectionStateChanged(...)`
+  - `onConnectFinished(...)`
+  - `onDisconnectFinished(...)`
+- 토큰 상태 변화:
+  - `refreshTokenUi(...)`, `onTokenGranted(...)`, `onTokenFailed(...)`
+- 인증 진행 상태 변화:
+  - `onInteractiveAuthRequested(...)` 시작 시 `AUTH_IN_PROGRESS=true`
+  - `onOAuthCallbackReceived(...)`, `onOAuthSessionFailed(...)`, `onTokenGranted/Failed(...)` 종료 시 false
+
+구현 권장 API:
+
+```cpp
+enum class PlatformVisualState {
+    TOKEN_BAD,
+    TOKEN_OK,
+    ONLINE,
+    AUTH_IN_PROGRESS,
+};
+
+void updatePlatformVisualState(PlatformId platform);
+void applyPlatformIndicatorColor(PlatformId platform, PlatformVisualState state);
+```
+
+검증 항목:
+
+- YouTube/CHZZK 각각 토큰 정상 상태에서 초록 표시 확인
+- Connect 완료 시 해당 플랫폼 인디케이터가 하늘색으로 변경되는지 확인
+- 브라우저 인증 진행 중 주황색으로 변경되고, 완료/실패 시 기존 규칙으로 복귀하는지 확인
+- 토큰 삭제 또는 인증 실패 시 빨간색 전환 확인
+- 두 플랫폼 상태가 서로 독립적으로 갱신되는지 확인
 
 ### 8.4 운영자 액션 버튼 계획
 
@@ -1707,6 +1779,7 @@ MVP에서 제외 가능 항목:
 8. 채팅 항목에 닉네임/권한 정보가 표시되고 클릭 시 액션 패널이 열린다.
 9. 공통 액션 1개 이상, YouTube 전용 1개 이상, 치지직 전용 1개 이상이 실행된다.
 10. 토큰/연결/액션 실패는 사용자에게 원인 코드와 함께 표시된다.
+11. 우측 `Actions` 상단의 YouTube/CHZZK 상태 사각형이 `인증중/온라인/토큰정상/토큰비정상` 규칙에 맞게 색상 전환된다.
 
 ## 19. 통합 테스트 시나리오
 
@@ -1743,6 +1816,14 @@ MVP에서 제외 가능 항목:
 1. 네트워크 차단 상태에서 Connect 실행
 2. 오류 코드/메시지가 UI에 표시되는지 확인
 3. 네트워크 복구 후 재시도 시 정상 연결되는지 확인
+
+### 19.6 플랫폼 상태 사각형 시나리오
+
+1. 토큰 정상 + 미연결 상태에서 두 플랫폼 사각형이 초록색인지 확인
+2. `Connect` 성공 후 해당 플랫폼 사각형이 하늘색으로 전환되는지 확인
+3. Configuration에서 브라우저 인증 시작 시 해당 플랫폼 사각형이 주황색으로 전환되는지 확인
+4. 인증 완료 후 사각형이 `하늘색(연결중)` 또는 `초록색(미연결)`으로 복귀하는지 확인
+5. 토큰 삭제/인증 실패 시 사각형이 빨간색으로 전환되는지 확인
 
 ## 20. 데이터 계약 상세
 

@@ -162,12 +162,18 @@ void ConnectionCoordinator::onAdapterDisconnected(PlatformId platform)
 
 void ConnectionCoordinator::onAdapterError(PlatformId platform, const QString& code, const QString& message)
 {
-    Q_UNUSED(code)
-    if (m_state != ConnectionState::CONNECTING && m_state != ConnectionState::PARTIALLY_CONNECTED) {
+    emit warningRaised(QStringLiteral("%1:%2").arg(platformKey(platform), code), message);
+    if (code.startsWith(QStringLiteral("TRACE_")) || code.startsWith(QStringLiteral("INFO_"))) {
         return;
     }
 
+    if (m_state != ConnectionState::CONNECTING && m_state != ConnectionState::PARTIALLY_CONNECTED) {
+        return;
+    }
     if (!m_targets.contains(platform)) {
+        return;
+    }
+    if (!m_pending.contains(platform)) {
         return;
     }
 

@@ -9,6 +9,7 @@
 #include "core/ConnectionCoordinator.h"
 #include "platform/chzzk/ChzzkAdapter.h"
 #include "platform/youtube/YouTubeAdapter.h"
+#include "ui/ChatterListDialog.h"
 
 #include <QHash>
 #include <QMainWindow>
@@ -17,10 +18,15 @@
 #include <QVector>
 
 class ConfigurationDialog;
+class ChatterListDialog;
+class QFrame;
 class QLabel;
+class QNetworkReply;
 class QPushButton;
 class QTableWidget;
 class QTextEdit;
+class QTimer;
+class QWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -31,6 +37,8 @@ private slots:
     void onConnectToggleClicked();
     void onToggleChatViewClicked();
     void onOpenConfiguration();
+    void onOpenChatterList();
+    void onResetChatterList();
 
     void onConfigApplyRequested(const AppSettingsSnapshot& snapshot);
     void onTokenRefreshRequested(PlatformId platform, const PlatformSettings& settings);
@@ -57,6 +65,7 @@ private slots:
     void onActionYoutubeDeleteMessage();
     void onActionYoutubeTimeout();
     void onActionChzzkRestrict();
+    void onLiveProbeTimeout();
 
 private:
     void setupUi();
@@ -64,11 +73,18 @@ private:
     void refreshChatViewToggleButton();
     void configureChatTableForCurrentView();
     void setPlatformStatus(PlatformId platform, const QString& statusText);
+    void setPlatformRuntimePhase(PlatformId platform, const QString& phase);
+    void setPlatformRuntimeError(PlatformId platform, const QString& code, const QString& message);
+    void clearPlatformRuntimeError(PlatformId platform);
+    void reconcileApiStatus();
     QString connectionStateText(ConnectionState state) const;
     void appendChatMessage(const UnifiedChatMessage& message);
     void appendChatRow(int row, const UnifiedChatMessage& message);
     void rebuildChatTable();
     QString messengerAuthorLabel(const UnifiedChatMessage& message) const;
+    QWidget* buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const;
+    void recordChatter(const UnifiedChatMessage& message);
+    void refreshChatterListDialog();
     void updateActionPanel();
     void setActionButtonState(QPushButton* button, bool enabled, const QString& reason);
     int selectedChatRow() const;
@@ -78,6 +94,36 @@ private:
     void refreshAllTokenUi();
     void tryStartupTokenRefresh();
     void tryStartupTokenRefreshForPlatform(PlatformId platform);
+    void refreshPlatformIndicators();
+    void refreshPlatformIndicator(PlatformId platform);
+    enum class PlatformVisualState {
+        TOKEN_BAD,
+        TOKEN_OK,
+        ONLINE,
+        AUTH_IN_PROGRESS,
+    };
+    PlatformVisualState resolvePlatformVisualState(PlatformId platform) const;
+    void applyPlatformIndicatorStyle(QFrame* indicator, PlatformId platform, PlatformVisualState state);
+    enum class LiveBroadcastState {
+        UNKNOWN,
+        CHECKING,
+        ONLINE,
+        OFFLINE,
+        ERROR,
+    };
+    void initializeLiveProbe();
+    void probeLiveStatus(PlatformId platform);
+    void probeYouTubeLiveStatus(const QString& accessToken);
+    void probeYouTubeLiveStatusBySearch(const QString& accessToken);
+    void probeChzzkLiveStatus(const QString& accessToken);
+    void setLiveBroadcastState(PlatformId platform, LiveBroadcastState state, const QString& detail);
+    QString liveBroadcastStateText(LiveBroadcastState state) const;
+    void refreshLiveBroadcastIndicators();
+    void refreshLiveBroadcastIndicator(PlatformId platform);
+    void applyLiveBroadcastIndicatorStyle(QFrame* indicator, QLabel* label, PlatformId platform);
+    bool isPlatformLiveOnline(PlatformId platform) const;
+    void syncYouTubeProfileFromAccessToken(const QString& accessToken);
+    void syncChzzkProfileFromAccessToken(const QString& accessToken);
     QMap<PlatformId, bool> currentConnections() const;
     TokenState inferTokenState(const TokenRecord* record) const;
     QUrl buildAuthorizationUrl(PlatformId platform, const PlatformSettings& settings, const QString& state, const QString& codeChallenge) const;
@@ -86,11 +132,18 @@ private:
     bool startTokenRefreshFlow(PlatformId platform, const PlatformSettings& settings, const TokenRecord& currentRecord);
     bool startAuthCodeExchangeFlow(PlatformId platform, const PlatformSettings& settings, const QString& code, const QString& codeVerifier, const QString& authState);
     void appendTokenAudit(PlatformId platform, const QString& action, bool ok, const QString& detail);
+    AppSettingsSnapshot buildRuntimeConnectSnapshot(const AppSettingsSnapshot& base) const;
 
     struct PendingTokenFlowContext {
         QString flow;
         PlatformSettings settings;
         TokenRecord previousRecord;
+    };
+    struct PlatformRuntimeState {
+        QString phase;
+        QString lastErrorCode;
+        QString lastErrorMessage;
+        QDateTime updatedAtUtc;
     };
 
     AppSettings m_settings;
@@ -105,12 +158,27 @@ private:
     QHash<PlatformId, QString> m_pendingPkceVerifier;
     QHash<PlatformId, PendingTokenFlowContext> m_pendingTokenFlows;
     QHash<PlatformId, bool> m_pendingTokenRevokes;
+    QHash<PlatformId, bool> m_authInProgress;
+    QHash<PlatformId, PlatformRuntimeState> m_platformRuntimeStates;
+    bool m_pauseYouTubeLiveProbe = true;
+    QHash<PlatformId, LiveBroadcastState> m_liveStates;
+    QHash<PlatformId, QString> m_liveStateDetails;
+    QTimer* m_liveProbeTimer = nullptr;
+    QTimer* m_apiStatusReconcileTimer = nullptr;
+    QDateTime m_nextPeriodicChzzkProbeAtUtc;
+    QDateTime m_nextPeriodicYouTubeProbeAtUtc;
+    QDateTime m_nextYouTubeLiveProbeAllowedAtUtc;
+    bool m_pendingYouTubeLiveProbe = false;
+    bool m_pendingChzzkLiveProbe = false;
+    bool m_pendingYouTubeProfileSync = false;
+    bool m_pendingChzzkProfileSync = false;
 
     ConnectionCoordinator m_connectionCoordinator;
     YouTubeAdapter m_youtubeAdapter;
     ChzzkAdapter m_chzzkAdapter;
 
     ConfigurationDialog* m_configurationDialog = nullptr;
+    ChatterListDialog* m_chatterListDialog = nullptr;
 
     enum class ChatViewMode {
         Messenger,
@@ -119,10 +187,17 @@ private:
 
     QPushButton* m_btnConnectToggle = nullptr;
     QPushButton* m_btnToggleChatView = nullptr;
+    QPushButton* m_btnOpenChatterList = nullptr;
     QPushButton* m_btnOpenConfiguration = nullptr;
     QLabel* m_lblConnectionState = nullptr;
     QLabel* m_lblYouTubeStatus = nullptr;
     QLabel* m_lblChzzkStatus = nullptr;
+    QFrame* m_boxYouTubeRuntime = nullptr;
+    QFrame* m_boxChzzkRuntime = nullptr;
+    QFrame* m_boxYouTubeLive = nullptr;
+    QFrame* m_boxChzzkLive = nullptr;
+    QLabel* m_lblYouTubeLive = nullptr;
+    QLabel* m_lblChzzkLive = nullptr;
     QTableWidget* m_tblChat = nullptr;
     QLabel* m_lblSelectedPlatform = nullptr;
     QLabel* m_lblSelectedAuthor = nullptr;
@@ -135,6 +210,7 @@ private:
     QTextEdit* m_txtEventLog = nullptr;
 
     QVector<UnifiedChatMessage> m_chatMessages;
+    QHash<QString, ChatterListEntry> m_chatterStats;
     ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
 };
 

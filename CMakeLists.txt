@@ -9,11 +9,14 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt5 REQUIRED COMPONENTS Core Widgets Network)
+find_package(Qt5 COMPONENTS WebSockets QUIET)
 
 add_executable(BotManagerQt5
     src/app/main.cpp
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/ChatterListDialog.cpp
+    src/ui/ChatterListDialog.h
     src/ui/ConfigurationDialog.cpp
     src/ui/ConfigurationDialog.h
     src/config/AppSettings.cpp
@@ -45,3 +48,10 @@ target_link_libraries(BotManagerQt5 PRIVATE
     Qt5::Widgets
     Qt5::Network
 )
+
+if (TARGET Qt5::WebSockets)
+    target_link_libraries(BotManagerQt5 PRIVATE Qt5::WebSockets)
+    target_compile_definitions(BotManagerQt5 PRIVATE BOTMANAGER_HAS_QT_WEBSOCKETS=1)
+else()
+    target_compile_definitions(BotManagerQt5 PRIVATE BOTMANAGER_HAS_QT_WEBSOCKETS=0)
+endif()

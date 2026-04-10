@@ -3,6 +3,10 @@
 
 #include "core/IChatPlatformAdapter.h"
 
+#include <QSet>
+
+class QNetworkAccessManager;
+class QNetworkReply;
 class QTimer;
 
 class YouTubeAdapter : public IChatPlatformAdapter {
@@ -16,9 +20,28 @@ public:
     bool isConnected() const override;
 
 private:
+    void scheduleNextTick(int delayMs);
+    void onLoopTick();
+    void requestActiveBroadcast();
+    void requestLiveByChannelSearch();
+    void requestVideoDetailsForLiveChat(const QString& videoId);
+    void requestLiveChatMessages();
+    void handleRequestFailure(const QString& code, const QString& message);
+
     bool m_connected = false;
-    int m_messageSeq = 0;
-    QTimer* m_chatTimer = nullptr;
+    bool m_running = false;
+    bool m_pendingConnectResult = false;
+    QTimer* m_loopTimer = nullptr;
+    QNetworkAccessManager* m_network = nullptr;
+    int m_generation = 0;
+    bool m_requestInFlight = false;
+
+    QString m_accessToken;
+    QString m_channelId;
+    QString m_channelName;
+    QString m_liveChatId;
+    QString m_nextPageToken;
+    QSet<QString> m_seenMessageIds;
 };
 
 #endif // YOUTUBE_ADAPTER_H

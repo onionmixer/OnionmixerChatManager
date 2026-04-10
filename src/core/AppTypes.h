@@ -34,6 +34,7 @@ struct PlatformSettings {
     QString channelId;
     QString channelName;
     QString accountLabel;
+    QString runtimeAccessToken; // runtime-only, not persisted to app.ini
 };
 
 struct AppSettingsSnapshot {
