@@ -1,0 +1,9 @@
+# Build outputs
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+
+# Personal workspace (all files under ./personal)
+/personal/
