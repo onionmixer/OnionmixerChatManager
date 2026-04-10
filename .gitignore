@@ -7,3 +7,6 @@
 
 # Personal workspace (all files under ./personal)
 /personal/
+
+# Local report artifacts
+/report*
