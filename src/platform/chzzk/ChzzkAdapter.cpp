@@ -215,6 +215,7 @@ void ChzzkAdapter::stop()
     m_subscribeSessionKey.clear();
     m_subscribeRecoverCount = 0;
     resetProgressAnnouncements();
+    m_seenMessageIds.clear();
     m_socket->abort();
     m_accessToken.clear();
     m_connected = false;
@@ -766,6 +767,17 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
 
         if (msg.text.trimmed().isEmpty()) {
             return;
+        }
+        const QString msgId = msg.messageId.trimmed();
+        if (!msgId.isEmpty()) {
+            if (m_seenMessageIds.contains(msgId)) {
+                return;
+            }
+            m_seenMessageIds.insert(msgId);
+            if (m_seenMessageIds.size() > 4000) {
+                m_seenMessageIds.clear();
+                m_seenMessageIds.insert(msgId);
+            }
         }
         emit chatReceived(msg);
     };

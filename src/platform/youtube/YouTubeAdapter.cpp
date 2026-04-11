@@ -241,7 +241,7 @@ QString YouTubeAdapter::extractYouTubeVideoIdFromHtml(const QString& html) const
     normalized.replace(QStringLiteral("\\/"), QStringLiteral("/"));
     normalized.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
 
-    const QList<QRegularExpression> patterns = {
+    static const QList<QRegularExpression> patterns = {
         QRegularExpression(QStringLiteral("https?://www\\.youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),
         QRegularExpression(QStringLiteral("https?://youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),
         QRegularExpression(QStringLiteral("content=\"https?://www\\.youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),

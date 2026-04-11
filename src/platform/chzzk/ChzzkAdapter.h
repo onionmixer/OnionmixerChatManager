@@ -4,6 +4,7 @@
 #include "core/IChatPlatformAdapter.h"
 
 #include <QJsonValue>
+#include <QSet>
 #include <QUrl>
 
 class QNetworkAccessManager;
@@ -61,6 +62,7 @@ private:
     bool m_announcedSessionPending = false;
     bool m_announcedSubscribePending = false;
     bool m_announcedChatReady = false;
+    QSet<QString> m_seenMessageIds;
 };
 
 #endif // CHZZK_ADAPTER_H

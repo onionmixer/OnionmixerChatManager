@@ -2866,3 +2866,58 @@ config 디렉토리를 다양한 방식으로 지정할 수 있도록 `AppSettin
 ### 31.6 크로스 플랫폼 폰트 호환
 
 INI에 저장된 폰트가 현 시스템에 존재하지 않으면 (예: Windows에서 저장한 "Arial"을 Linux에서 로드) 시스템 기본 폰트로 폴백한다. `AppSettings::load()`에서 `QFontDatabase().families()`로 존재 여부를 검증한다.
+
+## 32. 성능 최적화 및 메모리 보호
+
+> 작업일: 2026-04-11 ~ 2026-04-12
+
+### 32.1 메모리 보호 — 무제한 증가 방지
+
+장시간(24시간+) 방송 시 무제한으로 증가하는 데이터 구조를 식별하여 크기 제한을 추가하였다.
+
+| 구조체 | 제한 | 초과 시 동작 |
+|--------|------|-------------|
+| `m_chatMessages` (QVector) | `chatMaxMessages` (기본 5000, INI 설정 가능) | 80% batch trim + 테이블 재구축 |
+| `m_txtEventLog` (QTextEdit) | 10,000 블록 | Qt `setMaximumBlockCount` 자동 삭제 |
+| `m_chatterStats` (QHash) | 10,000건 | `rebuildChatterStatsFromMessages()`에서 `lastSeen` 기준 오래된 항목 제거. `recordChatter()`에서 신규 삽입 차단 |
+| `m_youtubeAuthorHandleCache` (QHash) | 5,000건 | 초과 시 전체 clear |
+| `m_seenMessageIds` — YouTube (QSet) | 4,000건 | 초과 시 전체 clear |
+| `m_seenMessageIds` — Chzzk (QSet) | 4,000건 (신규 추가) | 초과 시 전체 clear |
+| `m_sendHistory` (QStringList) | 100건 | FIFO |
+| `m_youtubeAuthorHandleLookupQueue` (QStringList) | 500건 | 초과 시 신규 요청 무시 |
+
+### 32.2 채팅자 통계 보호
+
+`rebuildChatterStatsFromMessages()`가 `m_chatterStats.clear()` 후 재구축하면 트리밍된 메시지의 채터 정보가 유실되는 문제를 수정하였다. 현재는 기존 통계를 병합(merge)하는 방식으로 변경되어, 메시지가 트리밍되어도 채터의 count/lastSeen이 보존된다.
+
+### 32.3 Chzzk 메시지 중복 방지
+
+YouTube에만 존재하던 `m_seenMessageIds` 중복 방지 메커니즘을 Chzzk에도 추가하였다. 웹소켓 재연결 시 동일 메시지가 재전송되는 경우 중복 표시를 방지한다.
+
+### 32.4 CPU 최적화
+
+#### 32.4.1 QRegularExpression static 전환
+
+`extractYouTubeVideoIdFromHtml()`에서 10개의 QRegularExpression이 매 호출마다 컴파일되던 문제를 `static const`로 전환하여 프로세스 수명 동안 1회만 컴파일되도록 변경하였다.
+
+#### 32.4.2 displayAuthorLabel 중복 호출 제거
+
+메시지 수신 시 `displayAuthorLabel()`이 3회 호출되던 문제(recordChatter, appendChatRow, 이벤트 로그)를 `onChatReceived()`에서 1회 계산 후 파라미터로 전달하는 방식으로 변경하였다. `recordChatter()`, `appendChatMessage()`, `appendChatRow()`는 기본 파라미터 `QString()`으로 선언하여 `rebuildChatTable()` 등 기존 호출과 호환된다.
+
+#### 32.4.3 refreshChatterListDialog 스로틀링
+
+대화자 목록 다이얼로그가 열려있을 때 매 메시지마다 O(n·log n) 정렬을 수행하던 문제를 1초 스로틀링으로 완화하였다. `m_chatterRefreshPending` 플래그로 중복 예약을 방지한다.
+
+#### 32.4.4 YouTube Author Lookup 타이머 완화
+
+Author handle lookup 타이머를 150ms → 500ms로 완화하여 초당 API 요청 빈도를 줄였다.
+
+### 32.5 윈도우 상태 저장/복원
+
+프로그램 종료 시 윈도우 크기/위치와 splitter 비율을 INI `[window]` 그룹에 자동 저장하고, 다음 시작 시 복원한다.
+
+| INI 키 | 내용 |
+|--------|------|
+| `[window]geometry` | 윈도우 위치, 크기, 최대화 상태 |
+| `[window]main_splitter` | 상하 splitter 비율 |
+| `[window]upper_splitter` | 좌우 splitter 비율 |

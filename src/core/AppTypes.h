@@ -50,6 +50,7 @@ struct AppSettingsSnapshot {
     bool chatFontBold = false;
     bool chatFontItalic = false;
     int chatLineSpacing = 3;
+    int chatMaxMessages = 5000;
     PlatformSettings youtube;
     PlatformSettings chzzk;
     QDateTime loadedAtUtc;

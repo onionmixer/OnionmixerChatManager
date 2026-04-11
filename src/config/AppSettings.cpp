@@ -120,6 +120,7 @@ AppSettingsSnapshot AppSettings::load() const
     snapshot.chatFontBold = s.value(QStringLiteral("chat_font_bold"), false).toBool();
     snapshot.chatFontItalic = s.value(QStringLiteral("chat_font_italic"), false).toBool();
     snapshot.chatLineSpacing = s.value(QStringLiteral("chat_line_spacing"), 3).toInt();
+    snapshot.chatMaxMessages = s.value(QStringLiteral("chat_max_messages"), 5000).toInt();
     s.endGroup();
 
     snapshot.youtube = loadPlatform(s, QStringLiteral("youtube"));
@@ -169,6 +170,7 @@ bool AppSettings::save(const AppSettingsSnapshot& snapshot) const
     s.setValue(QStringLiteral("chat_font_bold"), snapshot.chatFontBold);
     s.setValue(QStringLiteral("chat_font_italic"), snapshot.chatFontItalic);
     s.setValue(QStringLiteral("chat_line_spacing"), snapshot.chatLineSpacing);
+    s.setValue(QStringLiteral("chat_max_messages"), snapshot.chatMaxMessages);
     s.endGroup();
 
     savePlatform(s, QStringLiteral("youtube"), snapshot.youtube);

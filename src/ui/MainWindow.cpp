@@ -1206,6 +1206,7 @@ void MainWindow::setupUi()
     m_txtEventLog = new QTextEdit(root);
     m_txtEventLog->setReadOnly(true);
     m_txtEventLog->setObjectName(QStringLiteral("txtEventLog"));
+    m_txtEventLog->document()->setMaximumBlockCount(10000);
 
     auto* bottomWrap = new QWidget(root);
     auto* bottomLayout = new QVBoxLayout(bottomWrap);
@@ -1612,12 +1613,13 @@ QString MainWindow::displayPlatformPhase(const QString& phase) const
 
 void MainWindow::onChatReceived(const UnifiedChatMessage& message)
 {
+    const QString authorLabel = displayAuthorLabel(message);
     maybeQueueYouTubeAuthorHandleLookup(message);
-    recordChatter(message);
-    appendChatMessage(message);
+    recordChatter(message, authorLabel);
+    appendChatMessage(message, authorLabel);
     m_txtEventLog->append(QStringLiteral("[CHAT] %1 author=%2 text=%3")
                               .arg(platformKey(message.platform),
-                                  displayAuthorLabel(message),
+                                  authorLabel,
                                   message.text.left(120)));
     if (m_detailLogEnabled && message.platform == PlatformId::YouTube) {
         m_txtEventLog->append(QStringLiteral("[CHAT-TRACE] youtube rawDisplayName=%1 rawChannelId=%2 authorId=%3 owner=%4 moderator=%5 sponsor=%6 verified=%7")
@@ -1631,28 +1633,42 @@ void MainWindow::onChatReceived(const UnifiedChatMessage& message)
     }
 }
 
-void MainWindow::appendChatMessage(const UnifiedChatMessage& message)
+void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel)
 {
     m_chatMessages.push_back(message);
 
+    const int maxMessages = m_snapshot.chatMaxMessages;
+    if (maxMessages > 0 && m_chatMessages.size() > maxMessages) {
+        const int keepCount = maxMessages * 4 / 5;
+        m_chatMessages = m_chatMessages.mid(m_chatMessages.size() - keepCount);
+        rebuildChatTable();
+        m_tblChat->scrollToBottom();
+        updateActionPanel();
+        return;
+    }
+
     const int row = m_tblChat->rowCount();
     m_tblChat->insertRow(row);
-    appendChatRow(row, message);
+    appendChatRow(row, message, authorLabel);
 
     m_tblChat->scrollToBottom();
     updateActionPanel();
 }
 
-void MainWindow::recordChatter(const UnifiedChatMessage& message)
+void MainWindow::recordChatter(const UnifiedChatMessage& message, const QString& authorLabel)
 {
-    QString nickname = displayAuthorLabel(message).trimmed();
+    QString nickname = (authorLabel.isEmpty() ? displayAuthorLabel(message) : authorLabel).trimmed();
     if (nickname.isEmpty()) {
         nickname = QStringLiteral("-");
     }
 
     const QString key = QStringLiteral("%1|%2").arg(platformKey(message.platform), nickname);
     ChatterListEntry entry = m_chatterStats.value(key);
-    if (entry.count == 0) {
+    const bool isNew = (entry.count == 0);
+    if (isNew) {
+        if (m_chatterStats.size() >= 10000) {
+            return;
+        }
         entry.platform = message.platform;
         entry.nickname = nickname;
     }
@@ -1660,30 +1676,62 @@ void MainWindow::recordChatter(const UnifiedChatMessage& message)
     entry.lastSeen = message.timestamp.isValid() ? message.timestamp : QDateTime::currentDateTime();
     m_chatterStats.insert(key, entry);
 
-    if (m_chatterListDialog && m_chatterListDialog->isVisible()) {
-        refreshChatterListDialog();
+    if (m_chatterListDialog && m_chatterListDialog->isVisible() && !m_chatterRefreshPending) {
+        m_chatterRefreshPending = true;
+        QTimer::singleShot(1000, this, [this]() {
+            m_chatterRefreshPending = false;
+            refreshChatterListDialog();
+        });
     }
 }
 
 void MainWindow::rebuildChatterStatsFromMessages()
 {
-    m_chatterStats.clear();
+    // Rebuild by re-keying existing stats with updated display names.
+    // Preserves count/lastSeen for chatters whose messages were already trimmed.
+    QHash<QString, ChatterListEntry> updated;
+    // First, re-derive stats from current m_chatMessages (covers recent messages)
     for (const UnifiedChatMessage& message : m_chatMessages) {
         QString nickname = displayAuthorLabel(message).trimmed();
         if (nickname.isEmpty()) {
             nickname = QStringLiteral("-");
         }
-
         const QString key = QStringLiteral("%1|%2").arg(platformKey(message.platform), nickname);
-        ChatterListEntry entry = m_chatterStats.value(key);
+        ChatterListEntry entry = updated.value(key);
         if (entry.count == 0) {
             entry.platform = message.platform;
             entry.nickname = nickname;
         }
         ++entry.count;
         entry.lastSeen = message.timestamp.isValid() ? message.timestamp : QDateTime::currentDateTime();
-        m_chatterStats.insert(key, entry);
+        updated.insert(key, entry);
     }
+    // Merge: for entries in old stats that are NOT in the rebuilt set,
+    // preserve them (these are chatters whose messages were trimmed).
+    for (auto it = m_chatterStats.cbegin(); it != m_chatterStats.cend(); ++it) {
+        if (!updated.contains(it.key())) {
+            updated.insert(it.key(), it.value());
+        }
+    }
+
+    // Prune to 10000 entries by removing oldest (lastSeen) if exceeded
+    const int kMaxChatterStats = 10000;
+    if (updated.size() > kMaxChatterStats) {
+        QVector<QPair<QDateTime, QString>> byAge;
+        byAge.reserve(updated.size());
+        for (auto it = updated.cbegin(); it != updated.cend(); ++it) {
+            byAge.append({ it.value().lastSeen, it.key() });
+        }
+        std::sort(byAge.begin(), byAge.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+        const int removeCount = updated.size() - kMaxChatterStats;
+        for (int i = 0; i < removeCount; ++i) {
+            updated.remove(byAge.at(i).second);
+        }
+    }
+
+    m_chatterStats = updated;
 }
 
 void MainWindow::refreshChatterListDialog()
@@ -1714,13 +1762,13 @@ void MainWindow::refreshChatterListDialog()
     m_chatterListDialog->setEntries(rows);
 }
 
-void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message)
+void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel)
 {
     const QString platform = message.platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK");
     const QString timeText = message.timestamp.isValid()
         ? message.timestamp.toString(QStringLiteral("HH:mm:ss"))
         : QStringLiteral("-");
-    const QString authorDisplay = messengerAuthorLabel(message);
+    const QString authorDisplay = authorLabel.isEmpty() ? messengerAuthorLabel(message) : authorLabel;
 
     if (m_chatViewMode == ChatViewMode::Messenger) {
         const QString copyText = QStringLiteral("%1\n%2").arg(authorDisplay, message.text);
@@ -1932,10 +1980,13 @@ void MainWindow::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& m
         return;
     }
 
+    if (m_youtubeAuthorHandleLookupQueue.size() >= 500) {
+        return;
+    }
     m_youtubeAuthorHandlePending.insert(authorId);
     m_youtubeAuthorHandleLookupQueue.append(authorId);
     if (m_youtubeAuthorLookupTimer && !m_youtubeAuthorLookupTimer->isActive()) {
-        m_youtubeAuthorLookupTimer->start(150);
+        m_youtubeAuthorLookupTimer->start(500);
     }
 }
 
@@ -2004,6 +2055,9 @@ void MainWindow::flushYouTubeAuthorHandleLookupQueue()
                 }
                 const QString normalized = normalizeYouTubeHandle(customUrl);
                 if (!channelId.isEmpty() && !normalized.isEmpty()) {
+                    if (m_youtubeAuthorHandleCache.size() > 5000) {
+                        m_youtubeAuthorHandleCache.clear();
+                    }
                     m_youtubeAuthorHandleCache.insert(channelId, normalized);
                 }
             }

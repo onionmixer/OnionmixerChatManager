@@ -73,6 +73,7 @@ private:
     QCheckBox* m_chkChatFontBold = nullptr;
     QCheckBox* m_chkChatFontItalic = nullptr;
     QSpinBox* m_spnChatLineSpacing = nullptr;
+    QSpinBox* m_spnChatMaxMessages = nullptr;
     QWidget* m_chatPreviewContainer = nullptr;
     void updateChatPreview();
 

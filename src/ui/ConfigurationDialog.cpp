@@ -316,6 +316,7 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
     m_chkChatFontBold->setChecked(snapshot.chatFontBold);
     m_chkChatFontItalic->setChecked(snapshot.chatFontItalic);
     m_spnChatLineSpacing->setValue(snapshot.chatLineSpacing >= 0 ? snapshot.chatLineSpacing : 3);
+    m_spnChatMaxMessages->setValue(snapshot.chatMaxMessages > 0 ? snapshot.chatMaxMessages : 5000);
 
     m_ytChkEnabled->setChecked(snapshot.youtube.enabled);
     m_ytEdtClientId->setText(snapshot.youtube.clientId);
@@ -731,6 +732,12 @@ QWidget* ConfigurationDialog::createGeneralTab()
     m_spnChatLineSpacing->setValue(3);
     m_spnChatLineSpacing->setSuffix(QStringLiteral("px"));
 
+    m_spnChatMaxMessages = new QSpinBox(page);
+    m_spnChatMaxMessages->setObjectName(QStringLiteral("spnChatMaxMessages"));
+    m_spnChatMaxMessages->setRange(500, 50000);
+    m_spnChatMaxMessages->setValue(5000);
+    m_spnChatMaxMessages->setSingleStep(500);
+
     layout->addRow(tr("Language"), m_cmbLanguage);
     layout->addRow(tr("Log Level"), m_cmbLogLevel);
     layout->addRow(tr("Merge Order"), m_cmbMergeOrder);
@@ -740,6 +747,7 @@ QWidget* ConfigurationDialog::createGeneralTab()
     layout->addRow(tr("Chat Font Size"), m_spnChatFontSize);
     layout->addRow(tr("Chat Font Style"), fontStyleWrap);
     layout->addRow(tr("Chat Line Spacing"), m_spnChatLineSpacing);
+    layout->addRow(tr("Chat Max Messages"), m_spnChatMaxMessages);
 
     auto* previewGroup = new QGroupBox(tr("Chat Preview"), page);
     m_chatPreviewContainer = new QWidget(previewGroup);
@@ -1125,6 +1133,7 @@ AppSettingsSnapshot ConfigurationDialog::collectSnapshot() const
     snapshot.chatFontBold = m_chkChatFontBold->isChecked();
     snapshot.chatFontItalic = m_chkChatFontItalic->isChecked();
     snapshot.chatLineSpacing = m_spnChatLineSpacing->value();
+    snapshot.chatMaxMessages = m_spnChatMaxMessages->value();
     snapshot.youtube = collectPlatformSettings(PlatformId::YouTube);
     snapshot.chzzk = collectPlatformSettings(PlatformId::Chzzk);
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();

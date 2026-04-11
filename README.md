@@ -194,6 +194,23 @@ config 디렉토리 안에 `app.ini`와 `tokens.ini`가 위치합니다.
   - `token_endpoint=https://openapi.chzzk.naver.com/auth/v1/token`
 - `config/tokens.ini`는 개발 편의용입니다. 운영에서는 보안 저장소(QtKeychain 등) 사용을 권장합니다.
 
+## 8-1) 성능 보호
+
+장시간(24시간+) 방송에서도 메모리와 CPU가 안정적으로 유지되도록 다음 보호 메커니즘이 적용됩니다.
+
+메모리 보호:
+- 채팅 메시지: `chatMaxMessages` (기본 5000, Configuration에서 설정 가능) 초과 시 80% batch trim
+- 이벤트 로그: 10,000줄 초과 시 자동 삭제
+- 채팅자 통계: 10,000명 초과 시 오래된 항목 제거
+- YouTube/CHZZK 메시지 중복 방지: 플랫폼별 4,000건 dedup set
+- Author handle 캐시: 5,000건 제한
+
+CPU 보호:
+- `displayAuthorLabel()` 메시지당 1회 계산 후 전달 (3회 → 1회)
+- regex 패턴 `static const` 1회 컴파일
+- 채팅자 목록 갱신 1초 스로틀링
+- Author lookup 타이머 500ms
+
 ## 9) 라이브 상태 감지
 
 - 메인 `Actions` 패널의 토큰 상태 박스 아래에 플랫폼별 라이브 상태(YouTube/CHZZK)를 표시합니다.

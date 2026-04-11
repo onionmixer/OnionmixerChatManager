@@ -92,8 +92,8 @@ private:
     void clearPlatformRuntimeError(PlatformId platform);
     void reconcileApiStatus();
     QString connectionStateText(ConnectionState state) const;
-    void appendChatMessage(const UnifiedChatMessage& message);
-    void appendChatRow(int row, const UnifiedChatMessage& message);
+    void appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel = QString());
+    void appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel = QString());
     void rebuildChatTable();
     QString messengerAuthorLabel(const UnifiedChatMessage& message) const;
     QString displayAuthorLabel(const UnifiedChatMessage& message) const;
@@ -101,7 +101,7 @@ private:
     void maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message);
     void flushYouTubeAuthorHandleLookupQueue();
     QWidget* buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const;
-    void recordChatter(const UnifiedChatMessage& message);
+    void recordChatter(const UnifiedChatMessage& message, const QString& authorLabel = QString());
     void rebuildChatterStatsFromMessages();
     void refreshChatterListDialog();
     void updateActionPanel();
@@ -254,6 +254,7 @@ private:
     bool m_composerApplyingHistory = false;
     ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
     bool m_detailLogEnabled = false;
+    bool m_chatterRefreshPending = false;
 };
 
 #endif // MAIN_WINDOW_H
