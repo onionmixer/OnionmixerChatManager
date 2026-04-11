@@ -8,6 +8,7 @@
 #include <QAction>
 #include <QAbstractItemView>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -31,6 +32,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QStatusBar>
@@ -206,6 +208,7 @@ bool isDetailWarningCode(const QString& code)
 
 MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     : QMainWindow(parent)
+    , m_configDir(configDir)
     , m_settings(configDir + QStringLiteral("/app.ini"))
     , m_tokenVault(configDir + QStringLiteral("/tokens.ini"))
     , m_oauthTokenClient(&m_networkAccessManager, this)
@@ -324,6 +327,22 @@ void MainWindow::changeEvent(QEvent* event)
         retranslateUi();
     }
     QMainWindow::changeEvent(event);
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    QSettings ws(m_configDir + QStringLiteral("/app.ini"), QSettings::IniFormat);
+    ws.beginGroup(QStringLiteral("window"));
+    ws.setValue(QStringLiteral("geometry"), saveGeometry());
+    if (m_mainSplitter) {
+        ws.setValue(QStringLiteral("main_splitter"), m_mainSplitter->saveState());
+    }
+    if (m_upperSplitter) {
+        ws.setValue(QStringLiteral("upper_splitter"), m_upperSplitter->saveState());
+    }
+    ws.endGroup();
+    ws.sync();
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::onConnectToggleClicked()
@@ -1207,6 +1226,24 @@ void MainWindow::setupUi()
 
     setCentralWidget(root);
     resize(1000, 700);
+
+    {
+        QSettings ws(m_configDir + QStringLiteral("/app.ini"), QSettings::IniFormat);
+        ws.beginGroup(QStringLiteral("window"));
+        const QByteArray geometry = ws.value(QStringLiteral("geometry")).toByteArray();
+        if (!geometry.isEmpty()) {
+            restoreGeometry(geometry);
+        }
+        const QByteArray mainSplit = ws.value(QStringLiteral("main_splitter")).toByteArray();
+        if (!mainSplit.isEmpty() && m_mainSplitter) {
+            m_mainSplitter->restoreState(mainSplit);
+        }
+        const QByteArray upperSplit = ws.value(QStringLiteral("upper_splitter")).toByteArray();
+        if (!upperSplit.isEmpty() && m_upperSplitter) {
+            m_upperSplitter->restoreState(upperSplit);
+        }
+        ws.endGroup();
+    }
 
     connect(m_btnConnectToggle, &QPushButton::clicked, this, &MainWindow::onConnectToggleClicked);
     connect(m_btnToggleChatView, &QPushButton::clicked, this, &MainWindow::onToggleChatViewClicked);

@@ -41,6 +41,7 @@ public:
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void changeEvent(QEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onConnectToggleClicked();
@@ -170,6 +171,7 @@ private:
         QDateTime updatedAtUtc;
     };
 
+    QString m_configDir;
     AppSettings m_settings;
     FileTokenVault m_tokenVault;
     OAuthLocalServer m_oauthLocalServer;

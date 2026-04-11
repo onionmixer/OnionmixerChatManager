@@ -175,6 +175,17 @@ config 디렉토리 안에 `app.ini`와 `tokens.ini`가 위치합니다.
 
 - 메시지 입력창과 전송 버튼은 항상 고정 크기로 하단에 유지됩니다.
 - 상하 Splitter는 채팅 영역 ↔ 이벤트 로그만 제어합니다.
+- 윈도우 크기/위치 및 splitter 비율은 종료 시 INI `[window]` 그룹에 자동 저장되며, 다음 시작 시 복원됩니다.
+
+저장 항목:
+
+| INI 키 | 내용 |
+|--------|------|
+| `[window]geometry` | 윈도우 위치, 크기, 최대화 상태 |
+| `[window]main_splitter` | 상하 splitter 비율 |
+| `[window]upper_splitter` | 좌우 splitter 비율 |
+
+첫 실행 시(키 없음) 기본값: 1000×700, splitter 비율 4:1 / 3:2.
 
 ## 8) 주의
 
