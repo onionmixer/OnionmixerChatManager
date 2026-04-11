@@ -65,6 +65,7 @@ private:
     QComboBox* m_cmbLogLevel = nullptr;
     QComboBox* m_cmbMergeOrder = nullptr;
     QCheckBox* m_chkAutoReconnect = nullptr;
+    QCheckBox* m_chkDetailLog = nullptr;
 
     QCheckBox* m_ytChkEnabled = nullptr;
     QLineEdit* m_ytEdtClientId = nullptr;

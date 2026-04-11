@@ -297,6 +297,7 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
     m_cmbLogLevel->setCurrentText(snapshot.logLevel);
     m_cmbMergeOrder->setCurrentText(snapshot.mergeOrder);
     m_chkAutoReconnect->setChecked(snapshot.autoReconnect);
+    m_chkDetailLog->setChecked(snapshot.detailLogEnabled);
 
     m_ytChkEnabled->setChecked(snapshot.youtube.enabled);
     m_ytEdtClientId->setText(snapshot.youtube.clientId);
@@ -679,11 +680,14 @@ QWidget* ConfigurationDialog::createGeneralTab()
 
     m_chkAutoReconnect = new QCheckBox(QStringLiteral("Enable Auto Reconnect"), page);
     m_chkAutoReconnect->setObjectName(QStringLiteral("chkAutoReconnect"));
+    m_chkDetailLog = new QCheckBox(QStringLiteral("Enable Detail Log (TRACE/INFO)"), page);
+    m_chkDetailLog->setObjectName(QStringLiteral("chkDetailLog"));
 
     layout->addRow(QStringLiteral("Language"), m_cmbLanguage);
     layout->addRow(QStringLiteral("Log Level"), m_cmbLogLevel);
     layout->addRow(QStringLiteral("Merge Order"), m_cmbMergeOrder);
     layout->addRow(QString(), m_chkAutoReconnect);
+    layout->addRow(QString(), m_chkDetailLog);
 
     return page;
 }
@@ -934,6 +938,7 @@ AppSettingsSnapshot ConfigurationDialog::collectSnapshot() const
     snapshot.logLevel = m_cmbLogLevel->currentText();
     snapshot.mergeOrder = m_cmbMergeOrder->currentText();
     snapshot.autoReconnect = m_chkAutoReconnect->isChecked();
+    snapshot.detailLogEnabled = m_chkDetailLog->isChecked();
     snapshot.youtube = collectPlatformSettings(PlatformId::YouTube);
     snapshot.chzzk = collectPlatformSettings(PlatformId::Chzzk);
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();

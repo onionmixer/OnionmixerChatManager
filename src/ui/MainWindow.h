@@ -19,9 +19,11 @@
 
 class ConfigurationDialog;
 class ChatterListDialog;
+class QEvent;
 class QFrame;
 class QLabel;
 class QNetworkReply;
+class QPlainTextEdit;
 class QPushButton;
 class QTableWidget;
 class QTextEdit;
@@ -32,6 +34,9 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onConnectToggleClicked();
@@ -65,6 +70,8 @@ private slots:
     void onActionYoutubeDeleteMessage();
     void onActionYoutubeTimeout();
     void onActionChzzkRestrict();
+    void onComposerHistoryPrevRequested();
+    void onComposerHistoryNextRequested();
     void onLiveProbeTimeout();
 
 private:
@@ -86,10 +93,16 @@ private:
     void recordChatter(const UnifiedChatMessage& message);
     void refreshChatterListDialog();
     void updateActionPanel();
+    void updateComposerUiState();
     void setActionButtonState(QPushButton* button, bool enabled, const QString& reason);
     int selectedChatRow() const;
     const UnifiedChatMessage* selectedChatMessage() const;
     void executeAction(const QString& actionId);
+    void sendComposedMessage();
+    bool dispatchSendToYouTube(const QString& text);
+    bool dispatchSendToChzzk(const QString& text);
+    void pushComposerHistory(const QString& text);
+    void applyComposerHistoryText(const QString& text);
     void refreshTokenUi(PlatformId platform);
     void refreshAllTokenUi();
     void tryStartupTokenRefresh();
@@ -160,14 +173,12 @@ private:
     QHash<PlatformId, bool> m_pendingTokenRevokes;
     QHash<PlatformId, bool> m_authInProgress;
     QHash<PlatformId, PlatformRuntimeState> m_platformRuntimeStates;
-    bool m_pauseYouTubeLiveProbe = true;
     QHash<PlatformId, LiveBroadcastState> m_liveStates;
     QHash<PlatformId, QString> m_liveStateDetails;
     QTimer* m_liveProbeTimer = nullptr;
     QTimer* m_apiStatusReconcileTimer = nullptr;
     QDateTime m_nextPeriodicChzzkProbeAtUtc;
     QDateTime m_nextPeriodicYouTubeProbeAtUtc;
-    QDateTime m_nextYouTubeLiveProbeAllowedAtUtc;
     bool m_pendingYouTubeLiveProbe = false;
     bool m_pendingChzzkLiveProbe = false;
     bool m_pendingYouTubeProfileSync = false;
@@ -207,11 +218,18 @@ private:
     QPushButton* m_btnActionYoutubeDeleteMessage = nullptr;
     QPushButton* m_btnActionYoutubeTimeout = nullptr;
     QPushButton* m_btnActionChzzkRestrict = nullptr;
+    QPlainTextEdit* m_edtComposer = nullptr;
+    QPushButton* m_btnComposerSend = nullptr;
     QTextEdit* m_txtEventLog = nullptr;
 
     QVector<UnifiedChatMessage> m_chatMessages;
     QHash<QString, ChatterListEntry> m_chatterStats;
+    QStringList m_sendHistory;
+    int m_sendHistoryIndex = 0;
+    QString m_sendHistoryDraft;
+    bool m_composerApplyingHistory = false;
     ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
+    bool m_detailLogEnabled = false;
 };
 
 #endif // MAIN_WINDOW_H

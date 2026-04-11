@@ -9,11 +9,13 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QEvent>
 #include <QFrame>
 #include <QFormLayout>
 #include <QGuiApplication>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QKeySequence>
 #include <QGridLayout>
@@ -23,6 +25,7 @@
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QShortcut>
@@ -31,6 +34,7 @@
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTextCursor>
 #include <QTextEdit>
 #include <QTimer>
 #include <QUuid>
@@ -143,6 +147,16 @@ bool isQuotaExceededMessage(const QString& message)
         || normalized.contains(QStringLiteral("daily limit"));
 }
 
+QString extractYouTubeErrorReason(const QJsonObject& root)
+{
+    const QJsonObject error = root.value(QStringLiteral("error")).toObject();
+    const QJsonArray errors = error.value(QStringLiteral("errors")).toArray();
+    if (!errors.isEmpty() && errors.first().isObject()) {
+        return errors.first().toObject().value(QStringLiteral("reason")).toString().trimmed();
+    }
+    return QString();
+}
+
 bool tryPlatformFromCodePrefix(const QString& code, PlatformId* outPlatform, QString* outInnerCode)
 {
     const int sep = code.indexOf(QLatin1Char(':'));
@@ -171,6 +185,14 @@ bool tryPlatformFromCodePrefix(const QString& code, PlatformId* outPlatform, QSt
     }
     return false;
 }
+
+bool isDetailWarningCode(const QString& code)
+{
+    const int sep = code.indexOf(QLatin1Char(':'));
+    const QString innerCode = (sep >= 0 ? code.mid(sep + 1) : code).trimmed().toUpper();
+    return innerCode.startsWith(QStringLiteral("TRACE_"))
+        || innerCode.startsWith(QStringLiteral("INFO_"));
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -185,6 +207,7 @@ MainWindow::MainWindow(QWidget* parent)
     setupUi();
 
     m_snapshot = m_settings.load();
+    m_detailLogEnabled = m_snapshot.detailLogEnabled;
 
     m_connectionCoordinator.bindAdapters({
         { PlatformId::YouTube, &m_youtubeAdapter },
@@ -253,12 +276,42 @@ MainWindow::MainWindow(QWidget* parent)
     reconcileApiStatus();
 }
 
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == m_edtComposer && event && event->type() == QEvent::KeyPress) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const Qt::KeyboardModifiers mods = keyEvent->modifiers();
+        const int key = keyEvent->key();
+
+        if ((key == Qt::Key_Return || key == Qt::Key_Enter) && mods == Qt::NoModifier) {
+            onActionSendMessage();
+            return true;
+        }
+        if (key == Qt::Key_Space && mods == Qt::ShiftModifier) {
+            if (m_edtComposer) {
+                m_edtComposer->insertPlainText(QStringLiteral("\n"));
+            }
+            return true;
+        }
+        if (key == Qt::Key_Up && mods == Qt::ControlModifier) {
+            onComposerHistoryPrevRequested();
+            return true;
+        }
+        if (key == Qt::Key_Down && mods == Qt::ControlModifier) {
+            onComposerHistoryNextRequested();
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
 void MainWindow::onConnectToggleClicked()
 {
     switch (m_connectionCoordinator.state()) {
     case ConnectionState::IDLE:
     case ConnectionState::ERROR:
         m_snapshot = m_settings.load();
+        m_detailLogEnabled = m_snapshot.detailLogEnabled;
         m_connectionCoordinator.connectAll(buildRuntimeConnectSnapshot(m_snapshot));
         break;
     case ConnectionState::CONNECTED:
@@ -316,6 +369,7 @@ void MainWindow::onConfigApplyRequested(const AppSettingsSnapshot& snapshot)
     }
 
     m_snapshot = snapshot;
+    m_detailLogEnabled = snapshot.detailLogEnabled;
     m_txtEventLog->append(QStringLiteral("[CONFIG] Applied and saved."));
     statusBar()->showMessage(QStringLiteral("Configuration updated. Reconnect to apply running session."), 4000);
     onLiveProbeTimeout();
@@ -631,7 +685,6 @@ void MainWindow::onTokenGranted(PlatformId platform,
     m_txtEventLog->append(QStringLiteral("[TOKEN-OK] %1 flow=%2").arg(platformKey(platform), flow));
     reconcileApiStatus();
     if (platform == PlatformId::YouTube) {
-        m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime();
         m_nextPeriodicYouTubeProbeAtUtc = QDateTime();
     }
     if (platform == PlatformId::YouTube
@@ -668,7 +721,7 @@ void MainWindow::onTokenFailed(PlatformId platform, const QString& flow, const Q
     setPlatformRuntimeError(platform, errorCode, detailWithGuidance);
     reconcileApiStatus();
     if (errorCode == QStringLiteral("invalid_grant")) {
-        setLiveBroadcastState(platform, LiveBroadcastState::ERROR, QStringLiteral("Token invalid"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Live check skipped: token invalid"));
     }
 }
 
@@ -789,16 +842,48 @@ void MainWindow::onDisconnectFinished()
 
 void MainWindow::onWarningRaised(const QString& code, const QString& message)
 {
-    m_txtEventLog->append(QStringLiteral("[WARN] %1: %2").arg(code, message));
+    const bool isDetail = isDetailWarningCode(code);
+    if (m_detailLogEnabled || !isDetail) {
+        m_txtEventLog->append(QStringLiteral("[WARN] %1: %2").arg(code, message));
+    }
     PlatformId platform = PlatformId::YouTube;
     QString innerCode;
     if (tryPlatformFromCodePrefix(code, &platform, &innerCode)) {
-        if (!innerCode.startsWith(QStringLiteral("TRACE_")) && !innerCode.startsWith(QStringLiteral("INFO_"))) {
+        const QString normalizedInnerCode = innerCode.trimmed().toUpper();
+        if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVECHAT_ID_PENDING")) {
+            setPlatformStatus(PlatformId::YouTube, QStringLiteral("CONNECTED_NO_LIVECHAT"));
+            setPlatformRuntimePhase(PlatformId::YouTube, QStringLiteral("CONNECTED_NO_LIVECHAT"));
+            clearPlatformRuntimeError(PlatformId::YouTube);
+            reconcileApiStatus();
+        } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVECHAT_ID_READY")) {
+            setPlatformStatus(PlatformId::YouTube, QStringLiteral("CONNECTED"));
+            setPlatformRuntimePhase(PlatformId::YouTube, QStringLiteral("CONNECTED"));
+            clearPlatformRuntimeError(PlatformId::YouTube);
+            reconcileApiStatus();
+        } else if (platform == PlatformId::Chzzk && normalizedInnerCode == QStringLiteral("INFO_CHZZK_SESSION_PENDING")) {
+            setPlatformStatus(PlatformId::Chzzk, QStringLiteral("CONNECTED_NO_SESSIONKEY"));
+            setPlatformRuntimePhase(PlatformId::Chzzk, QStringLiteral("CONNECTED_NO_SESSIONKEY"));
+            clearPlatformRuntimeError(PlatformId::Chzzk);
+            reconcileApiStatus();
+        } else if (platform == PlatformId::Chzzk && normalizedInnerCode == QStringLiteral("INFO_CHZZK_SUBSCRIBE_PENDING")) {
+            setPlatformStatus(PlatformId::Chzzk, QStringLiteral("CONNECTED_NO_SUBSCRIBE"));
+            setPlatformRuntimePhase(PlatformId::Chzzk, QStringLiteral("CONNECTED_NO_SUBSCRIBE"));
+            clearPlatformRuntimeError(PlatformId::Chzzk);
+            reconcileApiStatus();
+        } else if (platform == PlatformId::Chzzk && normalizedInnerCode == QStringLiteral("INFO_CHZZK_CHAT_READY")) {
+            setPlatformStatus(PlatformId::Chzzk, QStringLiteral("CONNECTED"));
+            setPlatformRuntimePhase(PlatformId::Chzzk, QStringLiteral("CONNECTED"));
+            clearPlatformRuntimeError(PlatformId::Chzzk);
+            reconcileApiStatus();
+        }
+        if (!normalizedInnerCode.startsWith(QStringLiteral("TRACE_")) && !normalizedInnerCode.startsWith(QStringLiteral("INFO_"))) {
             setPlatformRuntimeError(platform, innerCode, message);
             reconcileApiStatus();
         }
     }
-    statusBar()->showMessage(QStringLiteral("%1: %2").arg(code, message), 4000);
+    if (m_detailLogEnabled || !isDetail) {
+        statusBar()->showMessage(QStringLiteral("%1: %2").arg(code, message), 4000);
+    }
 }
 
 void MainWindow::setupUi()
@@ -941,6 +1026,31 @@ void MainWindow::setupUi()
 
     actionPanelLayout->addWidget(legendWrap);
 
+    auto* liveLegendWrap = new QWidget(actionPanel);
+    liveLegendWrap->setObjectName(QStringLiteral("liveStatusLegend"));
+    auto* liveLegendGrid = new QGridLayout(liveLegendWrap);
+    liveLegendGrid->setContentsMargins(0, 0, 0, 0);
+    liveLegendGrid->setHorizontalSpacing(10);
+    liveLegendGrid->setVerticalSpacing(4);
+
+    auto addLiveLegendItem = [liveLegendWrap, liveLegendGrid](int row, int col, const QString& color, const QString& label) {
+        auto* chip = new QFrame(liveLegendWrap);
+        chip->setFixedSize(12, 12);
+        chip->setStyleSheet(QStringLiteral("background-color:%1; border:1px solid #666666; border-radius:2px;").arg(color));
+        auto* text = new QLabel(label, liveLegendWrap);
+        const int base = col * 2;
+        liveLegendGrid->addWidget(chip, row, base);
+        liveLegendGrid->addWidget(text, row, base + 1);
+    };
+
+    addLiveLegendItem(0, 0, QStringLiteral("#90A4AE"), QStringLiteral("라이브미확인"));
+    addLiveLegendItem(0, 1, QStringLiteral("#5C6BC0"), QStringLiteral("라이브확인중"));
+    addLiveLegendItem(1, 0, QStringLiteral("#26A69A"), QStringLiteral("라이브온라인"));
+    addLiveLegendItem(1, 1, QStringLiteral("#BCAAA4"), QStringLiteral("라이브오프라인"));
+    addLiveLegendItem(2, 0, QStringLiteral("#8E24AA"), QStringLiteral("라이브오류"));
+
+    actionPanelLayout->addWidget(liveLegendWrap);
+
     connect(m_btnActionSendMessage, &QPushButton::clicked, this, &MainWindow::onActionSendMessage);
     connect(m_btnActionRestrictUser, &QPushButton::clicked, this, &MainWindow::onActionRestrictUser);
     connect(m_btnActionYoutubeDeleteMessage, &QPushButton::clicked, this, &MainWindow::onActionYoutubeDeleteMessage);
@@ -951,6 +1061,31 @@ void MainWindow::setupUi()
     centerLayout->addWidget(m_tblChat, 3);
     centerLayout->addWidget(actionPanel, 2);
 
+    auto* composerWrap = new QWidget(root);
+    composerWrap->setObjectName(QStringLiteral("composerWrap"));
+    auto* composerLayout = new QHBoxLayout(composerWrap);
+    composerLayout->setContentsMargins(0, 0, 0, 0);
+    composerLayout->setSpacing(8);
+    m_edtComposer = new QPlainTextEdit(composerWrap);
+    m_edtComposer->setObjectName(QStringLiteral("edtComposer"));
+    m_edtComposer->setPlaceholderText(QStringLiteral("Type message here... (Enter=Send, Shift+Space=New line, Ctrl+Up/Down=History)"));
+    m_edtComposer->setFixedHeight(68);
+    m_edtComposer->installEventFilter(this);
+    connect(m_edtComposer, &QPlainTextEdit::textChanged, this, [this]() {
+        if (!m_composerApplyingHistory) {
+            m_sendHistoryIndex = m_sendHistory.size();
+            if (m_edtComposer) {
+                m_sendHistoryDraft = m_edtComposer->toPlainText();
+            }
+        }
+        updateComposerUiState();
+    });
+    m_btnComposerSend = new QPushButton(QStringLiteral("Send"), composerWrap);
+    m_btnComposerSend->setObjectName(QStringLiteral("btnComposerSend"));
+    connect(m_btnComposerSend, &QPushButton::clicked, this, &MainWindow::onActionSendMessage);
+    composerLayout->addWidget(m_edtComposer, 1);
+    composerLayout->addWidget(m_btnComposerSend, 0, Qt::AlignBottom);
+
     m_txtEventLog = new QTextEdit(root);
     m_txtEventLog->setReadOnly(true);
     m_txtEventLog->setObjectName(QStringLiteral("txtEventLog"));
@@ -959,6 +1094,7 @@ void MainWindow::setupUi()
     rootLayout->addLayout(topLayout);
     rootLayout->addLayout(statusLayout);
     rootLayout->addLayout(centerLayout);
+    rootLayout->addWidget(composerWrap);
     rootLayout->addWidget(m_txtEventLog);
 
     setCentralWidget(root);
@@ -969,6 +1105,7 @@ void MainWindow::setupUi()
     connect(m_btnToggleChatView, &QPushButton::clicked, this, &MainWindow::onToggleChatViewClicked);
     connect(m_btnOpenChatterList, &QPushButton::clicked, this, &MainWindow::onOpenChatterList);
     connect(m_btnOpenConfiguration, &QPushButton::clicked, this, &MainWindow::onOpenConfiguration);
+    updateComposerUiState();
 }
 
 void MainWindow::refreshConnectButton()
@@ -1100,7 +1237,13 @@ void MainWindow::reconcileApiStatus()
         const QString phase = runtime.phase.trimmed().toUpper();
 
         if (connected) {
-            if (phase != QStringLiteral("CONNECTED")) {
+            const bool keepConnectedSpecial
+                = (platform == PlatformId::YouTube
+                      && phase == QStringLiteral("CONNECTED_NO_LIVECHAT"))
+                || (platform == PlatformId::Chzzk
+                    && (phase == QStringLiteral("CONNECTED_NO_SESSIONKEY")
+                        || phase == QStringLiteral("CONNECTED_NO_SUBSCRIBE")));
+            if (phase != QStringLiteral("CONNECTED") && !keepConnectedSpecial) {
                 setPlatformRuntimePhase(platform, QStringLiteral("CONNECTED"));
             }
             if (!runtime.lastErrorCode.trimmed().isEmpty() || !runtime.lastErrorMessage.trimmed().isEmpty()) {
@@ -1121,7 +1264,12 @@ void MainWindow::reconcileApiStatus()
                 setPlatformRuntimePhase(platform, QStringLiteral("STARTING"));
             }
         } else if (connState == ConnectionState::DISCONNECTING || connState == ConnectionState::IDLE) {
-            if (phase == QStringLiteral("STARTING") || phase == QStringLiteral("CONNECTING") || phase == QStringLiteral("CONNECTED")) {
+            if (phase == QStringLiteral("STARTING")
+                || phase == QStringLiteral("CONNECTING")
+                || phase == QStringLiteral("CONNECTED")
+                || phase == QStringLiteral("CONNECTED_NO_LIVECHAT")
+                || phase == QStringLiteral("CONNECTED_NO_SESSIONKEY")
+                || phase == QStringLiteral("CONNECTED_NO_SUBSCRIBE")) {
                 setPlatformRuntimePhase(platform, QStringLiteral("IDLE"));
                 clearPlatformRuntimeError(platform);
             }
@@ -1390,7 +1538,7 @@ void MainWindow::onCopySelectedChat()
 
 void MainWindow::onActionSendMessage()
 {
-    executeAction(QStringLiteral("common.send_message"));
+    sendComposedMessage();
 }
 
 void MainWindow::onActionRestrictUser()
@@ -1413,6 +1561,42 @@ void MainWindow::onActionChzzkRestrict()
     executeAction(QStringLiteral("chzzk.add_restriction"));
 }
 
+void MainWindow::onComposerHistoryPrevRequested()
+{
+    if (!m_edtComposer || m_sendHistory.isEmpty()) {
+        return;
+    }
+    if (m_sendHistoryIndex >= m_sendHistory.size()) {
+        m_sendHistoryDraft = m_edtComposer->toPlainText();
+        m_sendHistoryIndex = m_sendHistory.size() - 1;
+        applyComposerHistoryText(m_sendHistory.at(m_sendHistoryIndex));
+        return;
+    }
+    if (m_sendHistoryIndex > 0) {
+        --m_sendHistoryIndex;
+        applyComposerHistoryText(m_sendHistory.at(m_sendHistoryIndex));
+    }
+}
+
+void MainWindow::onComposerHistoryNextRequested()
+{
+    if (!m_edtComposer || m_sendHistory.isEmpty()) {
+        return;
+    }
+    if (m_sendHistoryIndex < 0) {
+        m_sendHistoryIndex = m_sendHistory.size();
+    }
+    if (m_sendHistoryIndex < m_sendHistory.size() - 1) {
+        ++m_sendHistoryIndex;
+        applyComposerHistoryText(m_sendHistory.at(m_sendHistoryIndex));
+        return;
+    }
+    if (m_sendHistoryIndex == m_sendHistory.size() - 1) {
+        m_sendHistoryIndex = m_sendHistory.size();
+        applyComposerHistoryText(m_sendHistoryDraft);
+    }
+}
+
 void MainWindow::updateActionPanel()
 {
     const UnifiedChatMessage* msg = selectedChatMessage();
@@ -1423,11 +1607,11 @@ void MainWindow::updateActionPanel()
         m_lblSelectedMessage->setText(QStringLiteral("-"));
 
         const QString reason = QStringLiteral("Select a chat message.");
-        setActionButtonState(m_btnActionSendMessage, false, reason);
         setActionButtonState(m_btnActionRestrictUser, false, reason);
         setActionButtonState(m_btnActionYoutubeDeleteMessage, false, reason);
         setActionButtonState(m_btnActionYoutubeTimeout, false, reason);
         setActionButtonState(m_btnActionChzzkRestrict, false, reason);
+        updateComposerUiState();
         return;
     }
 
@@ -1441,7 +1625,6 @@ void MainWindow::updateActionPanel()
     m_lblSelectedMessage->setText(msg->text);
 
     const bool platformReady = connections.value(msg->platform, false) && isPlatformLiveOnline(msg->platform);
-    setActionButtonState(m_btnActionSendMessage, platformReady, QStringLiteral("Platform disconnected or live is offline."));
     setActionButtonState(m_btnActionRestrictUser, !msg->authorId.isEmpty() && platformReady, QStringLiteral("Missing author id or platform not ready."));
 
     if (msg->platform == PlatformId::YouTube) {
@@ -1455,6 +1638,7 @@ void MainWindow::updateActionPanel()
         const bool chzzkReady = connections.value(PlatformId::Chzzk, false) && isPlatformLiveOnline(PlatformId::Chzzk);
         setActionButtonState(m_btnActionChzzkRestrict, !msg->authorId.isEmpty() && chzzkReady, QStringLiteral("Missing author id or CHZZK not ready."));
     }
+    updateComposerUiState();
 }
 
 void MainWindow::setActionButtonState(QPushButton* button, bool enabled, const QString& reason)
@@ -1508,6 +1692,218 @@ void MainWindow::executeAction(const QString& actionId)
     statusBar()->showMessage(QStringLiteral("Action failed: %1 (%2)").arg(actionId, result.errorCode), 3000);
 }
 
+void MainWindow::updateComposerUiState()
+{
+    const bool ytReady = m_youtubeAdapter.isConnected() && isPlatformLiveOnline(PlatformId::YouTube);
+    const bool chzReady = m_chzzkAdapter.isConnected() && isPlatformLiveOnline(PlatformId::Chzzk);
+    const bool anyPlatformReady = ytReady || chzReady;
+    const QString text = m_edtComposer ? m_edtComposer->toPlainText() : QString();
+    const bool hasText = !text.trimmed().isEmpty();
+    const bool enabled = hasText && anyPlatformReady;
+
+    QString reason;
+    if (!hasText) {
+        reason = QStringLiteral("Input message first.");
+    } else if (!anyPlatformReady) {
+        reason = QStringLiteral("Both platforms are disconnected or live is offline.");
+    }
+
+    setActionButtonState(m_btnActionSendMessage, enabled, reason);
+    setActionButtonState(m_btnComposerSend, enabled, reason);
+}
+
+void MainWindow::sendComposedMessage()
+{
+    if (!m_edtComposer) {
+        return;
+    }
+    const QString text = m_edtComposer->toPlainText();
+    if (text.trimmed().isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Input message first."), 2000);
+        return;
+    }
+
+    int started = 0;
+    if (dispatchSendToYouTube(text)) {
+        ++started;
+    }
+    if (dispatchSendToChzzk(text)) {
+        ++started;
+    }
+
+    if (started <= 0) {
+        statusBar()->showMessage(QStringLiteral("No platform is ready to send."), 2500);
+        return;
+    }
+
+    pushComposerHistory(text);
+    m_composerApplyingHistory = true;
+    m_edtComposer->clear();
+    m_composerApplyingHistory = false;
+    m_sendHistoryDraft.clear();
+    m_sendHistoryIndex = m_sendHistory.size();
+    updateComposerUiState();
+    m_txtEventLog->append(QStringLiteral("[SEND-SUMMARY] dispatched=%1").arg(started));
+}
+
+bool MainWindow::dispatchSendToYouTube(const QString& text)
+{
+    if (!m_youtubeAdapter.isConnected() || !isPlatformLiveOnline(PlatformId::YouTube)) {
+        return false;
+    }
+
+    TokenRecord record;
+    if (!m_tokenVault.read(PlatformId::YouTube, &record) || record.accessToken.trimmed().isEmpty()) {
+        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=TOKEN_MISSING msg=No access token"));
+        return false;
+    }
+
+    const QString liveChatId = m_youtubeAdapter.currentLiveChatId().trimmed();
+    if (liveChatId.isEmpty()) {
+        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=LIVECHAT_ID_MISSING msg=liveChatId unavailable"));
+        return false;
+    }
+
+    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/liveChat/messages"));
+    QUrlQuery query(url);
+    query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QJsonObject payload;
+    QJsonObject snippet;
+    QJsonObject details;
+    details.insert(QStringLiteral("messageText"), text);
+    snippet.insert(QStringLiteral("liveChatId"), liveChatId);
+    snippet.insert(QStringLiteral("type"), QStringLiteral("textMessageEvent"));
+    snippet.insert(QStringLiteral("textMessageDetails"), details);
+    payload.insert(QStringLiteral("snippet"), snippet);
+
+    QNetworkReply* reply = m_networkAccessManager.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    if (!reply) {
+        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=REQUEST_FAILED msg=Failed to create send request"));
+        return false;
+    }
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        QJsonObject obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) {
+            obj = doc.object();
+        }
+
+        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
+        if (reply->error() != QNetworkReply::NoError || !httpOk) {
+            const QString apiMessage = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString().trimmed();
+            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
+            m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=HTTP_%1 msg=%2")
+                                      .arg(httpStatus)
+                                      .arg(message));
+            reply->deleteLater();
+            return;
+        }
+
+        const QString messageId = obj.value(QStringLiteral("id")).toString().trimmed();
+        m_txtEventLog->append(QStringLiteral("[SEND-OK] youtube messageId=%1")
+                                  .arg(messageId.isEmpty() ? QStringLiteral("-") : messageId));
+        reply->deleteLater();
+    });
+    return true;
+}
+
+bool MainWindow::dispatchSendToChzzk(const QString& text)
+{
+    if (!m_chzzkAdapter.isConnected() || !isPlatformLiveOnline(PlatformId::Chzzk)) {
+        return false;
+    }
+
+    TokenRecord record;
+    if (!m_tokenVault.read(PlatformId::Chzzk, &record) || record.accessToken.trimmed().isEmpty()) {
+        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] chzzk code=TOKEN_MISSING msg=No access token"));
+        return false;
+    }
+
+    QNetworkRequest req(QUrl(QStringLiteral("https://openapi.chzzk.naver.com/open/v1/chats/send")));
+    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
+    if (!m_snapshot.chzzk.clientId.trimmed().isEmpty()) {
+        req.setRawHeader("Client-Id", m_snapshot.chzzk.clientId.trimmed().toUtf8());
+    }
+    if (!m_snapshot.chzzk.clientSecret.trimmed().isEmpty()) {
+        req.setRawHeader("Client-Secret", m_snapshot.chzzk.clientSecret.trimmed().toUtf8());
+    }
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("message"), text);
+    QNetworkReply* reply = m_networkAccessManager.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    if (!reply) {
+        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] chzzk code=REQUEST_FAILED msg=Failed to create send request"));
+        return false;
+    }
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        QJsonObject obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) {
+            obj = doc.object();
+        }
+
+        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
+        const int apiCode = obj.value(QStringLiteral("code")).toInt(200);
+        if (reply->error() != QNetworkReply::NoError || !httpOk || apiCode != 200) {
+            const QString apiMessage = obj.value(QStringLiteral("message")).toString().trimmed();
+            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
+            m_txtEventLog->append(QStringLiteral("[SEND-FAIL] chzzk code=HTTP_%1 msg=%2")
+                                      .arg(httpStatus)
+                                      .arg(message));
+            reply->deleteLater();
+            return;
+        }
+
+        m_txtEventLog->append(QStringLiteral("[SEND-OK] chzzk"));
+        reply->deleteLater();
+    });
+    return true;
+}
+
+void MainWindow::pushComposerHistory(const QString& text)
+{
+    const QString normalized = text;
+    if (normalized.trimmed().isEmpty()) {
+        return;
+    }
+    if (!m_sendHistory.isEmpty() && m_sendHistory.back() == normalized) {
+        m_sendHistoryIndex = m_sendHistory.size();
+        return;
+    }
+    m_sendHistory.push_back(normalized);
+    while (m_sendHistory.size() > 100) {
+        m_sendHistory.removeFirst();
+    }
+    m_sendHistoryIndex = m_sendHistory.size();
+}
+
+void MainWindow::applyComposerHistoryText(const QString& text)
+{
+    if (!m_edtComposer) {
+        return;
+    }
+    m_composerApplyingHistory = true;
+    m_edtComposer->setPlainText(text);
+    auto cursor = m_edtComposer->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    m_edtComposer->setTextCursor(cursor);
+    m_composerApplyingHistory = false;
+    updateComposerUiState();
+}
+
 void MainWindow::refreshTokenUi(PlatformId platform)
 {
     TokenRecord record;
@@ -1546,6 +1942,8 @@ void MainWindow::refreshPlatformIndicator(PlatformId platform)
 
 MainWindow::PlatformVisualState MainWindow::resolvePlatformVisualState(PlatformId platform) const
 {
+    // Token indicator must be independent from live probe/runtime warnings.
+    // Live/runtime problems are shown by platform status text + live indicator.
     if (m_authInProgress.value(platform, false)) {
         return PlatformVisualState::AUTH_IN_PROGRESS;
     }
@@ -1561,12 +1959,6 @@ MainWindow::PlatformVisualState MainWindow::resolvePlatformVisualState(PlatformI
         : m_chzzkAdapter.isConnected();
     if (online) {
         return PlatformVisualState::ONLINE;
-    }
-    if (phase == QStringLiteral("FAILED")) {
-        return PlatformVisualState::TOKEN_BAD;
-    }
-    if (!runtime.lastErrorCode.trimmed().isEmpty() || !runtime.lastErrorMessage.trimmed().isEmpty()) {
-        return PlatformVisualState::TOKEN_BAD;
     }
 
     TokenRecord record;
@@ -1647,12 +2039,6 @@ void MainWindow::onLiveProbeTimeout()
 
 void MainWindow::probeLiveStatus(PlatformId platform)
 {
-    if (platform == PlatformId::YouTube
-        && m_nextYouTubeLiveProbeAllowedAtUtc.isValid()
-        && QDateTime::currentDateTimeUtc() < m_nextYouTubeLiveProbeAllowedAtUtc) {
-        return;
-    }
-
     const PlatformSettings settings = settingsFor(platform);
     if (!settings.enabled) {
         setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Disabled"));
@@ -1667,7 +2053,7 @@ void MainWindow::probeLiveStatus(PlatformId platform)
 
     const TokenState tokenState = inferTokenState(&record);
     if (tokenState == TokenState::EXPIRED || tokenState == TokenState::NO_TOKEN || tokenState == TokenState::AUTH_REQUIRED) {
-        setLiveBroadcastState(platform, LiveBroadcastState::ERROR, QStringLiteral("Token unavailable"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Live check skipped: token unavailable"));
         return;
     }
 
@@ -1730,17 +2116,17 @@ void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
         const QString apiMessage = error.value(QStringLiteral("message")).toString().trimmed();
         const int apiCode = error.value(QStringLiteral("code")).toInt();
         const bool hasApiCode = error.value(QStringLiteral("code")).isDouble();
+        const QString apiReason = extractYouTubeErrorReason(obj);
 
         const bool httpOk = httpStatus >= 200 && httpStatus < 300;
         if (reply->error() != QNetworkReply::NoError || !httpOk) {
-            const QString detail = QStringLiteral("http=%1 apiCode=%2 msg=%3")
+            const QString detail = QStringLiteral("http=%1 apiCode=%2 reason=%3 msg=%4")
                                        .arg(httpStatus)
                                        .arg(hasApiCode ? QString::number(apiCode) : QStringLiteral("-"))
-                                       .arg(apiMessage.isEmpty() ? reply->errorString() : apiMessage);
+                                       .arg(apiReason.isEmpty() ? QStringLiteral("-") : apiReason,
+                                           apiMessage.isEmpty() ? reply->errorString() : apiMessage);
             if (isQuotaExceededMessage(detail)) {
-                m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime::currentDateTimeUtc().addSecs(300);
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR,
-                    QStringLiteral("%1 (cooldown 300s)").arg(detail));
+                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
                 reply->deleteLater();
                 return;
             }
@@ -1774,12 +2160,10 @@ void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
         }
 
         if (!isLive) {
-            m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime();
             setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, QStringLiteral("No active broadcast"));
             reply->deleteLater();
             return;
         }
-        m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime();
         setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE,
             liveTitle.isEmpty() ? QStringLiteral("Active broadcast detected") : liveTitle);
         reply->deleteLater();
@@ -1828,17 +2212,17 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
         const QString apiMessage = error.value(QStringLiteral("message")).toString().trimmed();
         const int apiCode = error.value(QStringLiteral("code")).toInt();
         const bool hasApiCode = error.value(QStringLiteral("code")).isDouble();
+        const QString apiReason = extractYouTubeErrorReason(obj);
 
         const bool httpOk = httpStatus >= 200 && httpStatus < 300;
         if (reply->error() != QNetworkReply::NoError || !httpOk) {
-            const QString detail = QStringLiteral("fallback http=%1 apiCode=%2 msg=%3")
+            const QString detail = QStringLiteral("fallback http=%1 apiCode=%2 reason=%3 msg=%4")
                                        .arg(httpStatus)
                                        .arg(hasApiCode ? QString::number(apiCode) : QStringLiteral("-"))
-                                       .arg(apiMessage.isEmpty() ? reply->errorString() : apiMessage);
+                                       .arg(apiReason.isEmpty() ? QStringLiteral("-") : apiReason,
+                                           apiMessage.isEmpty() ? reply->errorString() : apiMessage);
             if (isQuotaExceededMessage(detail)) {
-                m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime::currentDateTimeUtc().addSecs(300);
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR,
-                    QStringLiteral("%1 (cooldown 300s)").arg(detail));
+                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
                 reply->deleteLater();
                 return;
             }
@@ -1849,7 +2233,6 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
 
         const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
         if (items.isEmpty()) {
-            m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime();
             setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, QStringLiteral("No live search result"));
             reply->deleteLater();
             return;
@@ -1858,7 +2241,6 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
         const QJsonObject first = items.first().toObject();
         const QJsonObject snippet = first.value(QStringLiteral("snippet")).toObject();
         const QString title = snippet.value(QStringLiteral("title")).toString().trimmed();
-        m_nextYouTubeLiveProbeAllowedAtUtc = QDateTime();
         setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE,
             title.isEmpty() ? QStringLiteral("Live search result found") : title);
         reply->deleteLater();
@@ -1996,19 +2378,20 @@ void MainWindow::applyLiveBroadcastIndicatorStyle(QFrame* indicator, QLabel* lab
     const LiveBroadcastState state = m_liveStates.value(platform, LiveBroadcastState::UNKNOWN);
     const QString detail = m_liveStateDetails.value(platform).trimmed();
 
-    QString color = QStringLiteral("#9E9E9E");
+    // Live status uses a palette independent from token/runtime palette.
+    QString color = QStringLiteral("#90A4AE");
     switch (state) {
     case LiveBroadcastState::UNKNOWN:
-        color = QStringLiteral("#9E9E9E");
+        color = QStringLiteral("#90A4AE");
         break;
     case LiveBroadcastState::CHECKING:
-        color = QStringLiteral("#FFB74D");
+        color = QStringLiteral("#5C6BC0");
         break;
     case LiveBroadcastState::ONLINE:
-        color = QStringLiteral("#4FC3F7");
+        color = QStringLiteral("#26A69A");
         break;
     case LiveBroadcastState::OFFLINE:
-        color = QStringLiteral("#EF5350");
+        color = QStringLiteral("#BCAAA4");
         break;
     case LiveBroadcastState::ERROR:
         color = QStringLiteral("#8E24AA");

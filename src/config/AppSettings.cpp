@@ -77,6 +77,7 @@ AppSettingsSnapshot AppSettings::load() const
     snapshot.logLevel = s.value(QStringLiteral("log_level"), QStringLiteral("info")).toString();
     snapshot.mergeOrder = s.value(QStringLiteral("merge_order"), QStringLiteral("timestamp")).toString();
     snapshot.autoReconnect = s.value(QStringLiteral("auto_reconnect"), true).toBool();
+    snapshot.detailLogEnabled = s.value(QStringLiteral("detail_log_enabled"), false).toBool();
     s.endGroup();
 
     snapshot.youtube = loadPlatform(s, QStringLiteral("youtube"));
@@ -120,6 +121,7 @@ bool AppSettings::save(const AppSettingsSnapshot& snapshot) const
     s.setValue(QStringLiteral("log_level"), snapshot.logLevel);
     s.setValue(QStringLiteral("merge_order"), snapshot.mergeOrder);
     s.setValue(QStringLiteral("auto_reconnect"), snapshot.autoReconnect);
+    s.setValue(QStringLiteral("detail_log_enabled"), snapshot.detailLogEnabled);
     s.endGroup();
 
     savePlatform(s, QStringLiteral("youtube"), snapshot.youtube);

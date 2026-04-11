@@ -22,6 +22,7 @@ public:
     bool isConnected() const override;
 
 private:
+    void resetProgressAnnouncements();
     void requestSessionAuth();
     void connectSocket(const QString& sessionUrl);
     QUrl buildSocketUrl(const QString& sessionUrl) const;
@@ -56,6 +57,9 @@ private:
     int m_subscribeRetryCount = 0;
     QString m_subscribeSessionKey;
     int m_subscribeRecoverCount = 0;
+    bool m_announcedSessionPending = false;
+    bool m_announcedSubscribePending = false;
+    bool m_announcedChatReady = false;
 };
 
 #endif // CHZZK_ADAPTER_H

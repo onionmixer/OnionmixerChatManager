@@ -42,6 +42,7 @@ struct AppSettingsSnapshot {
     QString logLevel;
     QString mergeOrder;
     bool autoReconnect = true;
+    bool detailLogEnabled = false;
     PlatformSettings youtube;
     PlatformSettings chzzk;
     QDateTime loadedAtUtc;

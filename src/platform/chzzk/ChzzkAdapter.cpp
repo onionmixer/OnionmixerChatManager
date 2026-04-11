@@ -126,6 +126,13 @@ PlatformId ChzzkAdapter::platformId() const
     return PlatformId::Chzzk;
 }
 
+void ChzzkAdapter::resetProgressAnnouncements()
+{
+    m_announcedSessionPending = false;
+    m_announcedSubscribePending = false;
+    m_announcedChatReady = false;
+}
+
 void ChzzkAdapter::start(const PlatformSettings& settings)
 {
     if (m_connected) {
@@ -163,6 +170,7 @@ void ChzzkAdapter::start(const PlatformSettings& settings)
     m_subscribeRetryCount = 0;
     m_subscribeSessionKey.clear();
     m_subscribeRecoverCount = 0;
+    resetProgressAnnouncements();
     if (m_connectWatchdog) {
         m_connectWatchdog->start(12000);
     }
@@ -192,6 +200,7 @@ void ChzzkAdapter::stop()
     m_subscribeRetryCount = 0;
     m_subscribeSessionKey.clear();
     m_subscribeRecoverCount = 0;
+    resetProgressAnnouncements();
     m_socket->abort();
     m_accessToken.clear();
     m_connected = false;
@@ -379,6 +388,8 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
     url.setQuery(query);
 
     QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    req.setHeader(QNetworkRequest::ContentLengthHeader, 0);
     if (m_useClientSessionAuth) {
         if (!m_clientId.isEmpty()) {
             req.setRawHeader("Client-Id", m_clientId.toUtf8());
@@ -397,6 +408,11 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
     }
     m_subscribeInFlight = true;
     m_subscribeInFlightSessionKey = sessionKey;
+    if (!m_announcedSubscribePending) {
+        m_announcedSubscribePending = true;
+        emit error(platformId(), QStringLiteral("INFO_CHZZK_SUBSCRIBE_PENDING"),
+            QStringLiteral("Connected but waiting for CHZZK chat subscription."));
+    }
 
     const int gen = m_socketGeneration;
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen, sessionKey]() {
@@ -413,8 +429,14 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
             m_chatSubscribed = true;
             m_subscribeRetryCount = 0;
             m_subscribeRecoverCount = 0;
+            m_announcedSubscribePending = false;
             emit error(platformId(), QStringLiteral("TRACE_CHZZK_SUBSCRIBE_OK"),
                 QStringLiteral("sessionKey=%1 (already subscribed)").arg(sessionKey.left(12)));
+            if (!m_announcedChatReady) {
+                m_announcedChatReady = true;
+                emit error(platformId(), QStringLiteral("INFO_CHZZK_CHAT_READY"),
+                    QStringLiteral("CHZZK chat subscription is ready."));
+            }
             reply->deleteLater();
             return;
         }
@@ -449,6 +471,8 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
                 m_subscribeSessionKey.clear();
                 m_chatSubscribed = false;
                 m_sessionKey.clear();
+                m_announcedSubscribePending = false;
+                m_announcedChatReady = false;
                 requestSessionAuth();
             } else if (httpStatus == 404
                 && !m_useClientSessionAuth
@@ -464,6 +488,8 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
                 m_subscribeInFlight = false;
                 m_subscribeInFlightSessionKey.clear();
                 m_sessionKey.clear();
+                m_announcedSubscribePending = false;
+                m_announcedChatReady = false;
                 emit error(platformId(), QStringLiteral("TRACE_CHZZK_AUTH_MODE_SWITCH"),
                     QStringLiteral("switching session auth mode: user -> client"));
                 requestSessionAuth();
@@ -474,8 +500,14 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
             m_chatSubscribed = true;
             m_subscribeRetryCount = 0;
             m_subscribeRecoverCount = 0;
+            m_announcedSubscribePending = false;
             emit error(platformId(), QStringLiteral("TRACE_CHZZK_SUBSCRIBE_OK"),
                 QStringLiteral("sessionKey=%1").arg(sessionKey.left(12)));
+            if (!m_announcedChatReady) {
+                m_announcedChatReady = true;
+                emit error(platformId(), QStringLiteral("INFO_CHZZK_CHAT_READY"),
+                    QStringLiteral("CHZZK chat subscription is ready."));
+            }
         }
         reply->deleteLater();
     });
@@ -496,7 +528,15 @@ void ChzzkAdapter::onSocketConnected()
         emit connected(platformId());
     }
     emit error(platformId(), QStringLiteral("TRACE_CHZZK_SOCKET_CONNECTED"), QStringLiteral("socket connected"));
+    if (m_sessionKey.isEmpty() && !m_announcedSessionPending) {
+        m_announcedSessionPending = true;
+        emit error(platformId(), QStringLiteral("INFO_CHZZK_SESSION_PENDING"),
+            QStringLiteral("Connected but waiting for CHZZK sessionKey."));
+    }
     if (!m_sessionKey.isEmpty()) {
+        if (m_announcedSessionPending) {
+            m_announcedSessionPending = false;
+        }
         const int gen = m_socketGeneration;
         QTimer::singleShot(300, this, [this, gen]() {
             if (gen != m_socketGeneration || m_stopping || m_sessionKey.isEmpty()) {
@@ -515,6 +555,7 @@ void ChzzkAdapter::onSocketDisconnected()
 
     const bool wasConnected = m_connected || m_connectSignalEmitted;
     m_connected = false;
+    resetProgressAnnouncements();
     if (m_pendingConnectResult) {
         handleConnectFailure(QStringLiteral("SOCKET_DISCONNECTED"), QStringLiteral("Socket disconnected before connect completed"));
         return;
@@ -618,6 +659,9 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
             m_subscribeInFlightSessionKey.clear();
             m_subscribeRetryCount = 0;
             m_subscribeSessionKey.clear();
+            m_announcedSessionPending = false;
+            m_announcedSubscribePending = false;
+            m_announcedChatReady = false;
             emit error(platformId(), QStringLiteral("TRACE_CHZZK_SESSION_KEY"), QStringLiteral("sessionKey updated"));
             const int gen = m_socketGeneration;
             QTimer::singleShot(300, this, [this, gen]() {
@@ -633,6 +677,9 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
             m_subscribeInFlightSessionKey.clear();
             m_subscribeRetryCount = 0;
             m_subscribeSessionKey.clear();
+            m_announcedSessionPending = false;
+            m_announcedSubscribePending = false;
+            m_announcedChatReady = false;
             const int gen = m_socketGeneration;
             QTimer::singleShot(300, this, [this, gen]() {
                 if (gen != m_socketGeneration || m_stopping || m_sessionKey.isEmpty()) {
@@ -645,6 +692,12 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
             m_chatSubscribed = true;
             m_subscribeInFlight = false;
             m_subscribeInFlightSessionKey.clear();
+            m_announcedSubscribePending = false;
+            if (!m_announcedChatReady) {
+                m_announcedChatReady = true;
+                emit error(platformId(), QStringLiteral("INFO_CHZZK_CHAT_READY"),
+                    QStringLiteral("CHZZK chat subscription is ready."));
+            }
         }
         return;
     }
@@ -734,6 +787,7 @@ void ChzzkAdapter::handleConnectFailure(const QString& code, const QString& mess
     m_subscribeRetryCount = 0;
     m_subscribeSessionKey.clear();
     m_subscribeRecoverCount = 0;
+    resetProgressAnnouncements();
     if (m_connectWatchdog) {
         m_connectWatchdog->stop();
     }

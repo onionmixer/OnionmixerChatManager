@@ -3,6 +3,7 @@
 
 #include "core/IChatPlatformAdapter.h"
 
+#include <QDateTime>
 #include <QSet>
 
 class QNetworkAccessManager;
@@ -18,8 +19,12 @@ public:
     void start(const PlatformSettings& settings) override;
     void stop() override;
     bool isConnected() const override;
+    QString currentLiveChatId() const;
 
 private:
+    int connectDiscoveryDelayMs() const;
+    bool isBootstrapDiscoveryPhase() const;
+    void emitLiveChatPendingInfoOnce(const QString& detail);
     void scheduleNextTick(int delayMs);
     void onLoopTick();
     void requestActiveBroadcast();
@@ -42,6 +47,10 @@ private:
     QString m_liveChatId;
     QString m_nextPageToken;
     QSet<QString> m_seenMessageIds;
+    int m_bootstrapDiscoverAttempts = 0;
+    bool m_bootstrapSearchFallbackTried = false;
+    bool m_announcedLiveChatPending = false;
+    QDateTime m_nextSearchFallbackAllowedAtUtc;
 };
 
 #endif // YOUTUBE_ADAPTER_H

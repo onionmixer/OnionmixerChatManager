@@ -2015,3 +2015,218 @@ struct ValidationResult {
 4. 토큰 만료/권한 회수/네트워크 단절 장애 주입 테스트 통과
 5. 로그에 민감정보 미노출 샘플 점검 완료
 6. 문서의 actionId와 코드 상수 일치 검증 완료
+
+## 26. Configuration General - Detail Log 옵션 보강
+
+### 26.1 목적
+
+- 기본 운영 화면에서는 핵심 오류/상태 로그만 보이게 하고, 필요 시 상세 트레이스 로그(`TRACE_*`, `INFO_*`)를 즉시 켜서 진단할 수 있게 한다.
+
+### 26.2 UI/설정 명세
+
+- 위치: `Configuration > General`
+- 위젯: `QCheckBox` (`Enable Detail Log (TRACE/INFO)`)
+- 저장 키: `[app] detail_log_enabled=true|false` (`config/app.ini`)
+- 기본값: `false`
+
+### 26.3 동작 명세
+
+- `detail_log_enabled=false`
+  - 이벤트 로그 창(`EventLog`)에 `TRACE_*`, `INFO_*` 경고 메시지는 표시하지 않는다.
+  - 상태바의 단기 메시지도 동일하게 숨긴다.
+  - 단, 런타임 상태 판단(에러 코드 반영/API 상태 재조정)에 필요한 내부 처리 로직은 그대로 수행한다.
+- `detail_log_enabled=true`
+  - 기존과 동일하게 상세 경고 로그를 모두 표시한다.
+
+### 26.4 코드 반영 포인트
+
+- `AppSettingsSnapshot`에 `detailLogEnabled` 필드 추가
+- `AppSettings::load/save`에 `detail_log_enabled` 읽기/쓰기 추가
+- `ConfigurationDialog` General 탭에 체크박스 추가 및 snapshot 바인딩
+- `MainWindow::onWarningRaised`에서 코드 접두 검사 후 `TRACE_/INFO_` 로그 UI 출력만 조건부 제어
+
+### 26.5 검증 체크리스트
+
+1. 체크박스 `OFF` 저장 후 재시작 시 `config/app.ini`에 `detail_log_enabled=false`가 유지된다.
+2. `OFF` 상태에서 `TRACE_CHZZK_*`, `INFO_*` 로그가 EventLog에 보이지 않는다.
+3. `OFF` 상태에서도 실제 연결 실패/권한 오류 등 핵심 경고는 계속 보인다.
+4. `ON` 상태로 전환하면 상세 로그가 즉시 다시 표시된다.
+5. 상세 로그 ON/OFF와 무관하게 API status 색상/문구 반영은 정상 동작한다.
+
+## 27. YouTube `CONNECTED_NO_LIVECHAT` 상태 분리
+
+### 27.1 목적
+
+- `연결 성공`과 `liveChatId 확보 완료`를 분리해 운영자가 실제 채팅 수신 준비 상태를 즉시 구분할 수 있게 한다.
+
+### 27.2 상태 정의
+
+- `CONNECTED`: YouTube adapter 연결 + `liveChatId` 확보 완료
+- `CONNECTED_NO_LIVECHAT`: adapter 연결은 되었지만 `liveChatId` 미확보
+
+### 27.3 트리거 규칙
+
+- YouTube adapter가 `INFO_LIVECHAT_ID_PENDING`을 emit하면:
+  - MainWindow가 YouTube runtime phase를 `CONNECTED_NO_LIVECHAT`으로 전환
+- adapter가 `INFO_LIVECHAT_ID_READY`를 emit하면:
+  - MainWindow가 YouTube runtime phase를 `CONNECTED`로 복귀
+
+### 27.4 안정성/쿼터 정책
+
+- `liveBroadcasts` discovery 실패 시:
+  - quota/rate-limit 류(`quotaExceeded`, `rateLimitExceeded` 등)에서는 connect 실패로 전환하지 않고 연결 유지 + 10초 재시도
+- fallback `search`는 쿨다운(120초) 적용으로 과호출 방지
+- `liveChatNotFound`/`liveChatEnded` 발생 시 `liveChatId`를 비우고 재탐색 사이클로 복귀
+
+### 27.5 검증 체크리스트
+
+1. 방송 OFF 상태 Connect 시 `YouTube: CONNECTED_NO_LIVECHAT` 표시
+2. 방송 ON 후 `liveChatId` 확보 시 `YouTube: CONNECTED` 전환
+3. quota 오류 발생 시 즉시 `FAILED`로 떨어지지 않고 재시도 유지
+4. Detail Log OFF에서도 상태 전환(`CONNECTED_NO_LIVECHAT` <-> `CONNECTED`)은 정상 반영
+
+## 28. Token 상태와 Live 상태 분리 규약
+
+### 28.1 분리 목적
+
+- 운영자가 `토큰 문제`와 `방송 상태 문제`를 명확히 구분할 수 있게 한다.
+- 라이브 API 장애/오프라인 상황이 토큰 상태를 오염시키지 않도록 보장한다.
+
+### 28.2 상태 소유권
+
+| 영역 | 소유 상태 | 갱신 함수 |
+|---|---|---|
+| Token/API 박스 | `PlatformVisualState` | `resolvePlatformVisualState()` |
+| Live 박스 | `LiveBroadcastState` | `setLiveBroadcastState()` |
+
+규칙:
+- Token/API 박스는 `m_liveStates`, 라이브 API 결과를 참조하지 않는다.
+- Live 박스는 Token 박스 색상 로직을 참조하지 않는다.
+
+### 28.3 Token/API 박스 전이 규칙
+
+판단 입력:
+- `m_authInProgress`
+- 플랫폼 연결 상태(`adapter.isConnected()`)
+- 토큰 레코드(`TokenVault`, `inferTokenState`)
+
+판단 제외:
+- `LIVE_DISCOVERY_FAILED`, `SUBSCRIBE_FAILED`, `live-detail` 실패 등 라이브/채팅 런타임 오류
+
+전이 매트릭스:
+
+| 조건 | 결과 |
+|---|---|
+| 인증 진행 중 | `AUTH_IN_PROGRESS` |
+| 연결됨 | `ONLINE` |
+| 미연결 + token valid/expiring_soon | `TOKEN_OK` |
+| 미연결 + no token/expired/auth_required/error | `TOKEN_BAD` |
+
+### 28.4 Live 박스 전이 규칙
+
+판단 입력:
+- 플랫폼별 라이브 탐지 API 응답
+- 라이브 탐지 사전 조건(channel_id, access token 존재 여부)
+
+전이 매트릭스:
+
+| 조건 | 결과 |
+|---|---|
+| 비활성/토큰 없음/토큰 사용불가 | `UNKNOWN` (확인 스킵) |
+| 탐지 중 | `CHECKING` |
+| 방송중 | `ONLINE` |
+| 방송 아님 | `OFFLINE` |
+| 라이브 API 자체 실패(HTTP/파싱/권한/쿼터 등) | `ERROR` |
+
+### 28.5 플랫폼별 연결 준비 상태
+
+- YouTube:
+  - `CONNECTED_NO_LIVECHAT` -> `CONNECTED`
+- CHZZK:
+  - `CONNECTED_NO_SESSIONKEY` -> `CONNECTED_NO_SUBSCRIBE` -> `CONNECTED`
+
+위 상태는 연결/채팅 준비도 표현이며, Token/LIVE 판정 로직과 독립이다.
+
+### 28.6 회귀 테스트 체크리스트
+
+1. CHZZK 라이브 API 실패 시 Live 박스만 `ERROR`로 변하고 Token 박스는 기존 토큰 상태 유지
+2. YouTube quota 초과 시 Live 박스 `ERROR`, Token 박스는 `TOKEN_BAD`로 강등되지 않음
+3. 토큰 만료 시 Token 박스 `TOKEN_BAD`, Live 박스는 `UNKNOWN(확인 스킵)`으로 표시
+4. CONNECTED_NO_* 준비 상태 변경이 Token/LIVE 색상 규칙을 깨지 않음
+
+## 29. 메인 Composer 전송 동작 통합
+
+### 29.1 목표
+
+- 메인 화면 채팅창 하단 입력창(Composer)에서:
+  - `Enter` 단독 입력
+  - 우측 `Send Message` 버튼 클릭
+  - 위 두 트리거가 동일한 로직으로 동작해야 한다.
+- 결과적으로 두 트리거 모두 "`입력 텍스트를 YouTube + CHZZK로 전송`" 기능을 수행한다.
+
+### 29.2 단일 전송 엔드포인트 규약
+
+- `sendComposedMessage()` (가칭) 단일 함수로 전송 진입점을 통합
+- 다음 트리거는 반드시 `sendComposedMessage()`만 호출:
+  - Composer `Enter` (단독)
+  - `Send Message` 버튼
+- 금지:
+  - 버튼/키별로 서로 다른 전송 경로 구현
+  - 선택 채팅(Action target) 기반 분기와 Composer 전송 혼합
+
+### 29.3 UI/입력 규칙
+
+- Composer 위젯: `QPlainTextEdit` 기반
+- 키 동작:
+  - `Enter` 단독: 전송
+  - `Shift+Space`: 입력창 내부 줄바꿈
+  - `Ctrl+Up`: 이전 입력 history
+  - `Ctrl+Down`: 다음 입력 history / draft 복귀
+- 전송 후:
+  - 성공/부분성공 시 기본적으로 입력창 clear
+  - 실패 시 입력 내용 유지(재시도 가능)
+
+### 29.4 Send Message 버튼 의미 재정의
+
+- 기존 `Send Message` 버튼은 더 이상 `선택된 채팅 대상 액션`이 아니다.
+- 버튼의 의미를 Composer 전송으로 고정:
+  - `selectedChatMessage()` 유무와 무관하게 동작
+  - 기준은 Composer 텍스트 + 플랫폼 전송 가능 상태
+
+### 29.5 플랫폼 전송 정책
+
+- 전송 대상: YouTube, CHZZK 각각 독립 시도
+- 부분 성공 허용:
+  - 예: YouTube 성공 + CHZZK 실패 가능
+- 로그 출력:
+  - `[SEND-OK] platform=...`
+  - `[SEND-FAIL] platform=... code=...`
+  - `[SEND-SUMMARY] success=... fail=...`
+
+### 29.6 액션 시스템과의 정합성
+
+- `common.send_message`는 Composer 기반 전송으로 라우팅하거나 deprecated 처리
+- `restrict/delete/timeout` 등 선택 대상 액션은 기존처럼 `selectedChatMessage()` 기반 유지
+- 즉, `Send Message`만 의미를 전환하고 나머지 운영 액션은 현재 모델 유지
+
+### 29.7 구현 변경 포인트
+
+- `MainWindow`
+  - Composer 입력창/버튼 UI 추가 (채팅창 하단)
+  - `onActionSendMessage()` -> `sendComposedMessage()` 호출로 변경
+  - Enter 키 핸들러에서도 동일 함수 호출
+  - history 버퍼(`QStringList`, index, draft`) 추가
+- `ActionExecutor`
+  - `common.send_message`의 역할 축소 또는 우회(실제 전송은 MainWindow/Adapter 경유)
+- Platform Adapter
+  - YouTube 전송 API (`liveChatMessages.insert`)
+  - CHZZK 전송 API (`/open/v1/chats/send`)
+
+### 29.8 완료 기준(DoD)
+
+1. Composer에 텍스트 입력 후 `Enter`로 전송된다.
+2. 같은 텍스트가 버튼 클릭 시에도 동일하게 전송된다.
+3. Enter/버튼의 성공/실패 로그 형식이 동일하다.
+4. `Shift+Space` 줄바꿈이 정상 동작한다.
+5. `Ctrl+Up/Down` history 탐색이 정상 동작한다.
+6. 선택된 채팅이 없어도 `Send Message`는 Composer 텍스트 기준으로 동작한다.
