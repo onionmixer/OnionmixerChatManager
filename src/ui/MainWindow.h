@@ -27,6 +27,7 @@ class QLabel;
 class QNetworkReply;
 class QPlainTextEdit;
 class QPushButton;
+class QSplitter;
 class QTableWidget;
 class QTextEdit;
 class QTimer;
@@ -35,7 +36,7 @@ class QWidget;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(const QString& configDir, QWidget* parent = nullptr);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -220,6 +221,8 @@ private:
     QFrame* m_boxChzzkLive = nullptr;
     QLabel* m_lblYouTubeLive = nullptr;
     QLabel* m_lblChzzkLive = nullptr;
+    QSplitter* m_mainSplitter = nullptr;
+    QSplitter* m_upperSplitter = nullptr;
     QTableWidget* m_tblChat = nullptr;
     QLabel* m_lblSelectedPlatformCaption = nullptr;
     QLabel* m_lblSelectedAuthorCaption = nullptr;

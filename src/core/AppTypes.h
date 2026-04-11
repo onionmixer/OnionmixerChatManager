@@ -45,6 +45,11 @@ struct AppSettingsSnapshot {
     QString mergeOrder;
     bool autoReconnect = true;
     bool detailLogEnabled = false;
+    QString chatFontFamily;
+    int chatFontSize = 11;
+    bool chatFontBold = false;
+    bool chatFontItalic = false;
+    int chatLineSpacing = 3;
     PlatformSettings youtube;
     PlatformSettings chzzk;
     QDateTime loadedAtUtc;

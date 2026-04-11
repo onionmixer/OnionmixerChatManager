@@ -6,6 +6,7 @@
 #include <QAbstractItemView>
 #include <QBrush>
 #include <QColor>
+#include <QFontComboBox>
 #include <QFormLayout>
 #include <QFontMetrics>
 #include <QGridLayout>
@@ -27,6 +28,8 @@
 #include <QTabWidget>
 #include <QUrl>
 #include <QRegularExpression>
+#include <QSpinBox>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -304,6 +307,15 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
     m_cmbMergeOrder->setCurrentText(snapshot.mergeOrder);
     m_chkAutoReconnect->setChecked(snapshot.autoReconnect);
     m_chkDetailLog->setChecked(snapshot.detailLogEnabled);
+    if (!snapshot.chatFontFamily.isEmpty()) {
+        m_fntChat->setCurrentFont(QFont(snapshot.chatFontFamily));
+    } else {
+        m_fntChat->setCurrentFont(QGuiApplication::font());
+    }
+    m_spnChatFontSize->setValue(snapshot.chatFontSize > 0 ? snapshot.chatFontSize : 11);
+    m_chkChatFontBold->setChecked(snapshot.chatFontBold);
+    m_chkChatFontItalic->setChecked(snapshot.chatFontItalic);
+    m_spnChatLineSpacing->setValue(snapshot.chatLineSpacing >= 0 ? snapshot.chatLineSpacing : 3);
 
     m_ytChkEnabled->setChecked(snapshot.youtube.enabled);
     m_ytEdtClientId->setText(snapshot.youtube.clientId);
@@ -691,13 +703,169 @@ QWidget* ConfigurationDialog::createGeneralTab()
     m_chkDetailLog = new QCheckBox(tr("Enable Detail Log (TRACE/INFO)"), page);
     m_chkDetailLog->setObjectName(QStringLiteral("chkDetailLog"));
 
+    m_fntChat = new QFontComboBox(page);
+    m_fntChat->setObjectName(QStringLiteral("fntChatFont"));
+
+    m_spnChatFontSize = new QSpinBox(page);
+    m_spnChatFontSize->setObjectName(QStringLiteral("spnChatFontSize"));
+    m_spnChatFontSize->setRange(8, 24);
+    m_spnChatFontSize->setValue(11);
+    m_spnChatFontSize->setSuffix(QStringLiteral("px"));
+
+    m_chkChatFontBold = new QCheckBox(tr("Bold"), page);
+    m_chkChatFontBold->setObjectName(QStringLiteral("chkChatFontBold"));
+    m_chkChatFontItalic = new QCheckBox(tr("Italic"), page);
+    m_chkChatFontItalic->setObjectName(QStringLiteral("chkChatFontItalic"));
+
+    auto* fontStyleWrap = new QWidget(page);
+    auto* fontStyleLayout = new QHBoxLayout(fontStyleWrap);
+    fontStyleLayout->setContentsMargins(0, 0, 0, 0);
+    fontStyleLayout->setSpacing(12);
+    fontStyleLayout->addWidget(m_chkChatFontBold);
+    fontStyleLayout->addWidget(m_chkChatFontItalic);
+    fontStyleLayout->addStretch();
+
+    m_spnChatLineSpacing = new QSpinBox(page);
+    m_spnChatLineSpacing->setObjectName(QStringLiteral("spnChatLineSpacing"));
+    m_spnChatLineSpacing->setRange(0, 20);
+    m_spnChatLineSpacing->setValue(3);
+    m_spnChatLineSpacing->setSuffix(QStringLiteral("px"));
+
     layout->addRow(tr("Language"), m_cmbLanguage);
     layout->addRow(tr("Log Level"), m_cmbLogLevel);
     layout->addRow(tr("Merge Order"), m_cmbMergeOrder);
     layout->addRow(QString(), m_chkAutoReconnect);
     layout->addRow(QString(), m_chkDetailLog);
+    layout->addRow(tr("Chat Font"), m_fntChat);
+    layout->addRow(tr("Chat Font Size"), m_spnChatFontSize);
+    layout->addRow(tr("Chat Font Style"), fontStyleWrap);
+    layout->addRow(tr("Chat Line Spacing"), m_spnChatLineSpacing);
+
+    auto* previewGroup = new QGroupBox(tr("Chat Preview"), page);
+    m_chatPreviewContainer = new QWidget(previewGroup);
+    auto* previewGroupLayout = new QVBoxLayout(previewGroup);
+    previewGroupLayout->setContentsMargins(4, 4, 4, 4);
+    previewGroupLayout->addWidget(m_chatPreviewContainer);
+    previewGroup->setStyleSheet(QStringLiteral("QGroupBox { background: #FFFFFF; }"));
+    layout->addRow(previewGroup);
+
+    connect(m_fntChat, &QFontComboBox::currentFontChanged, this, &ConfigurationDialog::updateChatPreview);
+    connect(m_spnChatFontSize, QOverload<int>::of(&QSpinBox::valueChanged), this, &ConfigurationDialog::updateChatPreview);
+    connect(m_chkChatFontBold, &QCheckBox::toggled, this, &ConfigurationDialog::updateChatPreview);
+    connect(m_chkChatFontItalic, &QCheckBox::toggled, this, &ConfigurationDialog::updateChatPreview);
+    connect(m_spnChatLineSpacing, QOverload<int>::of(&QSpinBox::valueChanged), this, &ConfigurationDialog::updateChatPreview);
+
+    QTimer::singleShot(0, this, &ConfigurationDialog::updateChatPreview);
 
     return page;
+}
+
+void ConfigurationDialog::updateChatPreview()
+{
+    if (!m_chatPreviewContainer) {
+        return;
+    }
+
+    // Clear previous preview
+    QLayout* oldLayout = m_chatPreviewContainer->layout();
+    if (oldLayout) {
+        QLayoutItem* item;
+        while ((item = oldLayout->takeAt(0)) != nullptr) {
+            delete item->widget();
+            delete item;
+        }
+        delete oldLayout;
+    }
+
+    const int fontSize = qBound(8, m_spnChatFontSize->value(), 24);
+    const int lineSpacing = qBound(0, m_spnChatLineSpacing->value(), 20);
+    const bool isBold = m_chkChatFontBold->isChecked();
+    const bool isItalic = m_chkChatFontItalic->isChecked();
+    const int badgeSize = fontSize + 2;
+    const int badgeFontSize = qMax(fontSize - 4, 6);
+    const int timestampFontSize = qMax(fontSize - 2, 7);
+    const QString fontFamily = m_fntChat->currentFont().family().trimmed();
+    QString fontExtraStyle;
+    if (!fontFamily.isEmpty()) {
+        fontExtraStyle += QStringLiteral("font-family:'%1';").arg(fontFamily);
+    }
+    if (isBold) {
+        fontExtraStyle += QStringLiteral("font-weight:bold;");
+    }
+    if (isItalic) {
+        fontExtraStyle += QStringLiteral("font-style:italic;");
+    }
+
+    struct SampleMsg {
+        bool isYouTube;
+        QString author;
+        QString text;
+        QString time;
+    };
+    const SampleMsg samples[] = {
+        { true,  QStringLiteral("SampleUser"),
+          QStringLiteral("Hello, this is a YouTube message!"),
+          QStringLiteral("2026-04-11 15:30:00") },
+        { false, QString::fromUtf8("\xEC\xB9\x98\xEC\xA7\x80\xEC\xA7\x81\xEC\x8A\xA4\xED\x8A\xB8\xEB\xA6\xAC\xEB\xA8\xB8"),
+          QString::fromUtf8("\xEC\xB9\x98\xEC\xA7\x80\xEC\xA7\x81\xEC\x97\x90\xEC\x84\x9C \xEB\xB3\xB4\xEB\x82\xB8 \xEB\xA9\x94\xEC\x8B\x9C\xEC\xA7\x80\xEC\x9E\x85\xEB\x8B\x88\xEB\x8B\xA4."),
+          QStringLiteral("2026-04-11 15:30:05") },
+        { true, QString::fromUtf8("\xE3\x81\x95\xE3\x81\x8F\xE3\x82\x89"),
+          QString::fromUtf8("\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF\xEF\xBC\x81\xE9\x85\x8D\xE4\xBF\xA1\xE6\xA5\xBD\xE3\x81\x97\xE3\x81\xBF\xE3\x81\xAB\xE3\x81\x97\xE3\x81\xA6\xE3\x81\x84\xE3\x81\xBE\xE3\x81\x99\xE3\x80\x82"),
+          QStringLiteral("2026-04-11 15:30:10") },
+    };
+
+    auto* containerLayout = new QVBoxLayout(m_chatPreviewContainer);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(0);
+
+    for (const auto& msg : samples) {
+        auto* wrap = new QWidget(m_chatPreviewContainer);
+        auto* layout = new QVBoxLayout(wrap);
+        layout->setContentsMargins(8, lineSpacing, 8, lineSpacing);
+        layout->setSpacing(1);
+        layout->setAlignment(Qt::AlignTop);
+
+        auto* badge = new QLabel(wrap);
+        badge->setFixedSize(badgeSize, badgeSize);
+        badge->setAlignment(Qt::AlignCenter);
+        badge->setStyleSheet(msg.isYouTube
+            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
+                  .arg(badgeSize / 2).arg(badgeFontSize)
+            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
+                  .arg(badgeSize / 2).arg(badgeFontSize));
+        badge->setText(msg.isYouTube ? QString::fromUtf8("\xE2\x96\xB6") : QStringLiteral("Z"));
+
+        auto* lblAuthor = new QLabel(msg.author.toHtmlEscaped(), wrap);
+        lblAuthor->setStyleSheet(msg.isYouTube
+            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
+            : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle));
+
+        auto* lblTimestamp = new QLabel(msg.time, wrap);
+        lblTimestamp->setStyleSheet(QStringLiteral("color:#999999; font-size:%1px;%2").arg(timestampFontSize).arg(fontExtraStyle));
+
+        auto* headLayout = new QHBoxLayout;
+        headLayout->setContentsMargins(0, 0, 0, 0);
+        headLayout->setSpacing(8);
+        headLayout->addWidget(badge, 0, Qt::AlignVCenter);
+        headLayout->addWidget(lblAuthor, 0, Qt::AlignVCenter);
+        headLayout->addWidget(lblTimestamp, 0, Qt::AlignVCenter);
+        headLayout->addStretch();
+
+        auto* lblMessage = new QLabel(msg.text.toHtmlEscaped(), wrap);
+        lblMessage->setWordWrap(true);
+        lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2").arg(fontSize).arg(fontExtraStyle));
+
+        auto* bodyLayout = new QHBoxLayout;
+        bodyLayout->setContentsMargins(0, 0, 0, 0);
+        bodyLayout->setSpacing(0);
+        bodyLayout->addSpacing(badgeSize + 8);
+        bodyLayout->addWidget(lblMessage, 1, Qt::AlignTop);
+
+        layout->addLayout(headLayout);
+        layout->addLayout(bodyLayout);
+        containerLayout->addWidget(wrap);
+    }
+    containerLayout->addStretch();
 }
 
 QWidget* ConfigurationDialog::createYouTubeTab()
@@ -952,6 +1120,11 @@ AppSettingsSnapshot ConfigurationDialog::collectSnapshot() const
     snapshot.mergeOrder = m_cmbMergeOrder->currentText();
     snapshot.autoReconnect = m_chkAutoReconnect->isChecked();
     snapshot.detailLogEnabled = m_chkDetailLog->isChecked();
+    snapshot.chatFontFamily = m_fntChat->currentFont().family();
+    snapshot.chatFontSize = m_spnChatFontSize->value();
+    snapshot.chatFontBold = m_chkChatFontBold->isChecked();
+    snapshot.chatFontItalic = m_chkChatFontItalic->isChecked();
+    snapshot.chatLineSpacing = m_spnChatLineSpacing->value();
     snapshot.youtube = collectPlatformSettings(PlatformId::YouTube);
     snapshot.chzzk = collectPlatformSettings(PlatformId::Chzzk);
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();

@@ -35,6 +35,7 @@
 #include <QSignalBlocker>
 #include <QStatusBar>
 #include <QStringList>
+#include <QSplitter>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTextCursor>
@@ -203,10 +204,10 @@ bool isDetailWarningCode(const QString& code)
 }
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent)
+MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     : QMainWindow(parent)
-    , m_settings(QStringLiteral("config/app.ini"))
-    , m_tokenVault(QStringLiteral("config/tokens.ini"))
+    , m_settings(configDir + QStringLiteral("/app.ini"))
+    , m_tokenVault(configDir + QStringLiteral("/tokens.ini"))
     , m_oauthTokenClient(&m_networkAccessManager, this)
     , m_connectionCoordinator(this)
     , m_youtubeAdapter(this)
@@ -392,8 +393,16 @@ void MainWindow::onConfigApplyRequested(const AppSettingsSnapshot& snapshot)
     const bool reopenConfiguration = m_configurationDialog && m_configurationDialog->isVisible();
     const bool reopenChatterList = m_chatterListDialog && m_chatterListDialog->isVisible();
 
+    const bool chatFontChanged = m_snapshot.chatFontFamily != snapshot.chatFontFamily
+        || m_snapshot.chatFontSize != snapshot.chatFontSize
+        || m_snapshot.chatFontBold != snapshot.chatFontBold
+        || m_snapshot.chatFontItalic != snapshot.chatFontItalic
+        || m_snapshot.chatLineSpacing != snapshot.chatLineSpacing;
     m_snapshot = snapshot;
     m_detailLogEnabled = snapshot.detailLogEnabled;
+    if (chatFontChanged) {
+        rebuildChatTable();
+    }
     m_txtEventLog->append(QStringLiteral("[CONFIG] Applied and saved."));
     if (languageChanged) {
         QString languageError;
@@ -1145,9 +1154,11 @@ void MainWindow::setupUi()
     connect(m_btnActionYoutubeTimeout, &QPushButton::clicked, this, &MainWindow::onActionYoutubeTimeout);
     connect(m_btnActionChzzkRestrict, &QPushButton::clicked, this, &MainWindow::onActionChzzkRestrict);
 
-    auto* centerLayout = new QHBoxLayout;
-    centerLayout->addWidget(m_tblChat, 3);
-    centerLayout->addWidget(m_grpActionPanel, 2);
+    m_upperSplitter = new QSplitter(Qt::Horizontal, root);
+    m_upperSplitter->addWidget(m_tblChat);
+    m_upperSplitter->addWidget(m_grpActionPanel);
+    m_upperSplitter->setStretchFactor(0, 3);
+    m_upperSplitter->setStretchFactor(1, 2);
 
     auto* composerWrap = new QWidget(root);
     composerWrap->setObjectName(QStringLiteral("composerWrap"));
@@ -1176,13 +1187,23 @@ void MainWindow::setupUi()
     m_txtEventLog = new QTextEdit(root);
     m_txtEventLog->setReadOnly(true);
     m_txtEventLog->setObjectName(QStringLiteral("txtEventLog"));
-    m_txtEventLog->setMaximumHeight(180);
+
+    auto* bottomWrap = new QWidget(root);
+    auto* bottomLayout = new QVBoxLayout(bottomWrap);
+    bottomLayout->setContentsMargins(0, 0, 0, 0);
+    bottomLayout->setSpacing(4);
+    bottomLayout->addWidget(composerWrap, 0);
+    bottomLayout->addWidget(m_txtEventLog, 1);
+
+    m_mainSplitter = new QSplitter(Qt::Vertical, root);
+    m_mainSplitter->addWidget(m_upperSplitter);
+    m_mainSplitter->addWidget(bottomWrap);
+    m_mainSplitter->setStretchFactor(0, 4);
+    m_mainSplitter->setStretchFactor(1, 1);
 
     rootLayout->addLayout(topLayout);
     rootLayout->addLayout(statusLayout);
-    rootLayout->addLayout(centerLayout);
-    rootLayout->addWidget(composerWrap);
-    rootLayout->addWidget(m_txtEventLog);
+    rootLayout->addWidget(m_mainSplitter, 1);
 
     setCentralWidget(root);
     resize(1000, 700);
@@ -1673,7 +1694,8 @@ void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message)
         m_tblChat->setItem(row, 0, item);
         QWidget* widget = buildMessengerCellWidget(message, authorDisplay);
         m_tblChat->setCellWidget(row, 0, widget);
-        m_tblChat->setRowHeight(row, qMax(38, widget->sizeHint().height()));
+        const int minRowHeight = qBound(8, m_snapshot.chatFontSize, 24) * 3 + qBound(0, m_snapshot.chatLineSpacing, 20) * 2;
+        m_tblChat->setRowHeight(row, qMax(minRowHeight, widget->sizeHint().height()));
         return;
     }
 
@@ -1685,31 +1707,49 @@ void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message)
 
 QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const
 {
+    const int fontSize = qBound(8, m_snapshot.chatFontSize, 24);
+    const int lineSpacing = qBound(0, m_snapshot.chatLineSpacing, 20);
+    const bool isBold = m_snapshot.chatFontBold;
+    const bool isItalic = m_snapshot.chatFontItalic;
+    const int badgeSize = fontSize + 2;
+    const int badgeFontSize = qMax(fontSize - 4, 6);
+    const int timestampFontSize = qMax(fontSize - 2, 7);
+    const QString fontFamily = m_snapshot.chatFontFamily.trimmed();
+    QString fontExtraStyle;
+    if (!fontFamily.isEmpty()) {
+        fontExtraStyle += QStringLiteral("font-family:'%1';").arg(fontFamily);
+    }
+    if (isBold) {
+        fontExtraStyle += QStringLiteral("font-weight:bold;");
+    }
+    if (isItalic) {
+        fontExtraStyle += QStringLiteral("font-style:italic;");
+    }
+
     auto* wrap = new QWidget(m_tblChat);
     wrap->setObjectName(QStringLiteral("chatBubbleWrap"));
     wrap->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     wrap->setFocusPolicy(Qt::NoFocus);
 
     auto* layout = new QVBoxLayout(wrap);
-    layout->setContentsMargins(8, 3, 8, 3);
+    layout->setContentsMargins(8, lineSpacing, 8, lineSpacing);
     layout->setSpacing(1);
     layout->setAlignment(Qt::AlignTop);
 
     auto* badge = new QLabel(wrap);
-    const int badgeSize = message.platform == PlatformId::Chzzk ? 11 : 13;
     badge->setFixedSize(badgeSize, badgeSize);
     badge->setAlignment(Qt::AlignCenter);
     badge->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     badge->setFocusPolicy(Qt::NoFocus);
     badge->setStyleSheet(message.platform == PlatformId::YouTube
-            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:8px;")
-                  .arg(badgeSize / 2)
-            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:7px;")
-                  .arg(badgeSize / 2));
+            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
+                  .arg(badgeSize / 2).arg(badgeFontSize)
+            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
+                  .arg(badgeSize / 2).arg(badgeFontSize));
     badge->setText(message.platform == PlatformId::YouTube ? QStringLiteral("▶") : QStringLiteral("Z"));
     auto* badgeWrap = new QWidget(wrap);
     auto* badgeWrapLayout = new QVBoxLayout(badgeWrap);
-    badgeWrapLayout->setContentsMargins(0, 1, 0, 0); // icon 1px down
+    badgeWrapLayout->setContentsMargins(0, 1, 0, 0);
     badgeWrapLayout->setSpacing(0);
     badgeWrapLayout->addWidget(badge, 0, Qt::AlignTop);
 
@@ -1719,20 +1759,29 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
     lblAuthor->setFocusPolicy(Qt::NoFocus);
     lblAuthor->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     lblAuthor->setStyleSheet(message.platform == PlatformId::YouTube
-            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:11px;")
-            : QStringLiteral("color:#D17A00; font-weight:700; font-size:11px;"));
+            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
+            : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle));
 
     auto* lblMessage = new QLabel(message.text.toHtmlEscaped(), wrap);
     lblMessage->setWordWrap(true);
     lblMessage->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     lblMessage->setFocusPolicy(Qt::NoFocus);
-    lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:11px; font-weight:600;"));
+    lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2").arg(fontSize).arg(fontExtraStyle));
+
+    const QString timestampText = message.timestamp.isValid()
+        ? message.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+        : QString();
+    auto* lblTimestamp = new QLabel(timestampText, wrap);
+    lblTimestamp->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    lblTimestamp->setFocusPolicy(Qt::NoFocus);
+    lblTimestamp->setStyleSheet(QStringLiteral("color:#999999; font-size:%1px;%2").arg(timestampFontSize).arg(fontExtraStyle));
 
     auto* headLayout = new QHBoxLayout;
     headLayout->setContentsMargins(0, 0, 0, 0);
     headLayout->setSpacing(8);
     headLayout->addWidget(badgeWrap, 0, Qt::AlignVCenter);
     headLayout->addWidget(lblAuthor, 0, Qt::AlignVCenter);
+    headLayout->addWidget(lblTimestamp, 0, Qt::AlignVCenter);
     headLayout->addStretch();
 
     auto* bodyLayout = new QHBoxLayout;

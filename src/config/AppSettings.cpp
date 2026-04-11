@@ -1,6 +1,9 @@
 #include "config/AppSettings.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
+#include <QFontDatabase>
 #include <QSettings>
 #include <utility>
 
@@ -69,6 +72,25 @@ AppSettings::AppSettings(QString iniPath)
 {
 }
 
+QString AppSettings::resolveConfigDir(const QStringList& args)
+{
+    for (int i = 0; i < args.size() - 1; ++i) {
+        if (args.at(i) == QStringLiteral("--config-dir")) {
+            const QString candidate = args.at(i + 1).trimmed();
+            if (!candidate.isEmpty() && QDir(candidate).exists()) {
+                return QDir(candidate).absolutePath();
+            }
+        }
+    }
+
+    const QString envDir = QString::fromUtf8(qgetenv("BOTMANAGER_CONFIG_DIR")).trimmed();
+    if (!envDir.isEmpty() && QDir(envDir).exists()) {
+        return QDir(envDir).absolutePath();
+    }
+
+    return QCoreApplication::applicationDirPath() + QStringLiteral("/config");
+}
+
 AppSettingsSnapshot AppSettings::load() const
 {
     QSettings s(m_iniPath, QSettings::IniFormat);
@@ -80,6 +102,24 @@ AppSettingsSnapshot AppSettings::load() const
     snapshot.mergeOrder = s.value(QStringLiteral("merge_order"), QStringLiteral("timestamp")).toString();
     snapshot.autoReconnect = s.value(QStringLiteral("auto_reconnect"), true).toBool();
     snapshot.detailLogEnabled = s.value(QStringLiteral("detail_log_enabled"), false).toBool();
+    snapshot.chatFontFamily = s.value(QStringLiteral("chat_font_family")).toString().trimmed();
+    if (!snapshot.chatFontFamily.isEmpty()) {
+        const QStringList available = QFontDatabase().families();
+        bool found = false;
+        for (const QString& f : available) {
+            if (f.compare(snapshot.chatFontFamily, Qt::CaseInsensitive) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            snapshot.chatFontFamily.clear();
+        }
+    }
+    snapshot.chatFontSize = s.value(QStringLiteral("chat_font_size"), 11).toInt();
+    snapshot.chatFontBold = s.value(QStringLiteral("chat_font_bold"), false).toBool();
+    snapshot.chatFontItalic = s.value(QStringLiteral("chat_font_italic"), false).toBool();
+    snapshot.chatLineSpacing = s.value(QStringLiteral("chat_line_spacing"), 3).toInt();
     s.endGroup();
 
     snapshot.youtube = loadPlatform(s, QStringLiteral("youtube"));
@@ -124,6 +164,11 @@ bool AppSettings::save(const AppSettingsSnapshot& snapshot) const
     s.setValue(QStringLiteral("merge_order"), snapshot.mergeOrder);
     s.setValue(QStringLiteral("auto_reconnect"), snapshot.autoReconnect);
     s.setValue(QStringLiteral("detail_log_enabled"), snapshot.detailLogEnabled);
+    s.setValue(QStringLiteral("chat_font_family"), snapshot.chatFontFamily);
+    s.setValue(QStringLiteral("chat_font_size"), snapshot.chatFontSize);
+    s.setValue(QStringLiteral("chat_font_bold"), snapshot.chatFontBold);
+    s.setValue(QStringLiteral("chat_font_italic"), snapshot.chatFontItalic);
+    s.setValue(QStringLiteral("chat_line_spacing"), snapshot.chatLineSpacing);
     s.endGroup();
 
     savePlatform(s, QStringLiteral("youtube"), snapshot.youtube);

@@ -9,7 +9,8 @@
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
-    AppSettings settings(QStringLiteral("config/app.ini"));
+    const QString configDir = AppSettings::resolveConfigDir(app.arguments());
+    AppSettings settings(configDir + QStringLiteral("/app.ini"));
     const AppSettingsSnapshot snapshot = settings.load();
     AppLanguage::applyLanguage(app, snapshot.language);
 
@@ -23,7 +24,7 @@ int main(int argc, char* argv[])
     qRegisterMetaType<QVector<UnifiedChatMessage>>("QVector<UnifiedChatMessage>");
     qRegisterMetaType<TokenRecord>("TokenRecord");
 
-    MainWindow w;
+    MainWindow w(configDir);
     w.show();
     return app.exec();
 }

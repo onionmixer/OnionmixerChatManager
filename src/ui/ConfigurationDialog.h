@@ -7,10 +7,12 @@
 
 class QCheckBox;
 class QComboBox;
+class QFontComboBox;
 class QLineEdit;
 class QLabel;
 class QPlainTextEdit;
 class QPushButton;
+class QSpinBox;
 class QStatusBar;
 class QTabWidget;
 class QTableWidget;
@@ -66,6 +68,13 @@ private:
     QComboBox* m_cmbMergeOrder = nullptr;
     QCheckBox* m_chkAutoReconnect = nullptr;
     QCheckBox* m_chkDetailLog = nullptr;
+    QFontComboBox* m_fntChat = nullptr;
+    QSpinBox* m_spnChatFontSize = nullptr;
+    QCheckBox* m_chkChatFontBold = nullptr;
+    QCheckBox* m_chkChatFontItalic = nullptr;
+    QSpinBox* m_spnChatLineSpacing = nullptr;
+    QWidget* m_chatPreviewContainer = nullptr;
+    void updateChatPreview();
 
     QCheckBox* m_ytChkEnabled = nullptr;
     QLineEdit* m_ytEdtClientId = nullptr;

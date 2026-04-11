@@ -4,10 +4,13 @@
 #include "core/AppTypes.h"
 
 #include <QString>
+#include <QStringList>
 
 class AppSettings {
 public:
-    explicit AppSettings(QString iniPath = QStringLiteral("config/app.ini"));
+    explicit AppSettings(QString iniPath);
+
+    static QString resolveConfigDir(const QStringList& args);
 
     AppSettingsSnapshot load() const;
     bool save(const AppSettingsSnapshot& snapshot) const;
