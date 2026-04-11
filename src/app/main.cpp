@@ -20,6 +20,7 @@ int main(int argc, char* argv[])
     qRegisterMetaType<ConnectSessionResult>("ConnectSessionResult");
     qRegisterMetaType<TokenState>("TokenState");
     qRegisterMetaType<UnifiedChatMessage>("UnifiedChatMessage");
+    qRegisterMetaType<QVector<UnifiedChatMessage>>("QVector<UnifiedChatMessage>");
     qRegisterMetaType<TokenRecord>("TokenRecord");
 
     MainWindow w;

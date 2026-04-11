@@ -76,6 +76,7 @@ private:
     QPlainTextEdit* m_ytEdtScope = nullptr;
     QLineEdit* m_ytEdtChannelId = nullptr;
     QLineEdit* m_ytEdtChannelHandle = nullptr;
+    QLineEdit* m_ytEdtLiveVideoOverride = nullptr;
     QLabel* m_ytLblAccount = nullptr;
     QLabel* m_ytLblTokenState = nullptr;
     QLabel* m_ytLblAccessExpireAt = nullptr;

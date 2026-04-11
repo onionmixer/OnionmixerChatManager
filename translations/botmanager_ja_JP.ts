@@ -127,9 +127,12 @@
     <message><source>No token</source><translation>トークンなし</translation></message>
     <message><source>Loaded from vault</source><translation>保管領域から読み込み済み</translation></message>
     <message><source>Disabled</source><translation>無効</translation></message>
+    <message><source>Disconnected</source><translation>切断済み</translation></message>
     <message><source>No access token</source><translation>access token がありません。</translation></message>
     <message><source>Live check skipped: token unavailable</source><translation>トークンを利用できないため、ライブ確認をスキップしました。</translation></message>
     <message><source>Checking live status</source><translation>配信状態を確認中</translation></message>
+    <message><source>Connect required for YouTube live check</source><translation>YouTube 配信確認には接続が必要です。</translation></message>
+    <message><source>Waiting for YouTube adapter live state</source><translation>YouTube アダプターの配信状態を待機中です。</translation></message>
     <message><source>Failed to create liveBroadcasts request</source><translation>liveBroadcasts リクエストの作成に失敗しました。</translation></message>
     <message><source>channel_id missing (syncing profile)</source><translation>channel_id がないため、プロフィール同期を実行します。</translation></message>
     <message><source>No active broadcast</source><translation>アクティブな配信がありません。</translation></message>

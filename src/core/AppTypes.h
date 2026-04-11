@@ -7,6 +7,7 @@
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 enum class PlatformId {
     YouTube,
@@ -34,6 +35,7 @@ struct PlatformSettings {
     QString channelId;
     QString channelName;
     QString accountLabel;
+    QString liveVideoIdOverride;
     QString runtimeAccessToken; // runtime-only, not persisted to app.ini
 };
 
@@ -78,6 +80,12 @@ struct UnifiedChatMessage {
     QString channelName;
     QString authorId;
     QString authorName;
+    QString rawAuthorDisplayName;
+    QString rawAuthorChannelId;
+    bool authorIsChatOwner = false;
+    bool authorIsChatModerator = false;
+    bool authorIsChatSponsor = false;
+    bool authorIsVerified = false;
     QString text;
     QDateTime timestamp;
 };
@@ -99,6 +107,7 @@ Q_DECLARE_METATYPE(PlatformSettings)
 Q_DECLARE_METATYPE(ConnectSessionResult)
 Q_DECLARE_METATYPE(TokenState)
 Q_DECLARE_METATYPE(UnifiedChatMessage)
+Q_DECLARE_METATYPE(QVector<UnifiedChatMessage>)
 Q_DECLARE_METATYPE(TokenRecord)
 
 #endif // APP_TYPES_H

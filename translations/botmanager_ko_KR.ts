@@ -127,9 +127,12 @@
     <message><source>No token</source><translation>토큰 없음</translation></message>
     <message><source>Loaded from vault</source><translation>보관소에서 불러옴</translation></message>
     <message><source>Disabled</source><translation>비활성화됨</translation></message>
+    <message><source>Disconnected</source><translation>연결해제됨</translation></message>
     <message><source>No access token</source><translation>access token이 없습니다.</translation></message>
     <message><source>Live check skipped: token unavailable</source><translation>토큰을 사용할 수 없어 라이브 확인을 건너뜁니다.</translation></message>
     <message><source>Checking live status</source><translation>라이브 상태 확인중</translation></message>
+    <message><source>Connect required for YouTube live check</source><translation>YouTube 라이브 확인을 위해 연결이 필요합니다.</translation></message>
+    <message><source>Waiting for YouTube adapter live state</source><translation>YouTube 어댑터의 라이브 상태를 기다리는 중입니다.</translation></message>
     <message><source>Failed to create liveBroadcasts request</source><translation>liveBroadcasts 요청 생성에 실패했습니다.</translation></message>
     <message><source>channel_id missing (syncing profile)</source><translation>channel_id가 없어 프로필 동기화를 진행합니다.</translation></message>
     <message><source>No active broadcast</source><translation>활성 방송이 없습니다.</translation></message>

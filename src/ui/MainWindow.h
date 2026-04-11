@@ -14,6 +14,7 @@
 #include <QHash>
 #include <QMainWindow>
 #include <QNetworkAccessManager>
+#include <QSet>
 #include <QUrl>
 #include <QVector>
 
@@ -93,8 +94,13 @@ private:
     void appendChatRow(int row, const UnifiedChatMessage& message);
     void rebuildChatTable();
     QString messengerAuthorLabel(const UnifiedChatMessage& message) const;
+    QString displayAuthorLabel(const UnifiedChatMessage& message) const;
+    QString normalizeYouTubeHandle(const QString& value) const;
+    void maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message);
+    void flushYouTubeAuthorHandleLookupQueue();
     QWidget* buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const;
     void recordChatter(const UnifiedChatMessage& message);
+    void rebuildChatterStatsFromMessages();
     void refreshChatterListDialog();
     void updateActionPanel();
     void updateComposerUiState();
@@ -130,8 +136,6 @@ private:
     };
     void initializeLiveProbe();
     void probeLiveStatus(PlatformId platform);
-    void probeYouTubeLiveStatus(const QString& accessToken);
-    void probeYouTubeLiveStatusBySearch(const QString& accessToken);
     void probeChzzkLiveStatus(const QString& accessToken);
     void setLiveBroadcastState(PlatformId platform, LiveBroadcastState state, const QString& detail);
     QString liveBroadcastStateText(LiveBroadcastState state) const;
@@ -151,6 +155,7 @@ private:
     bool startAuthCodeExchangeFlow(PlatformId platform, const PlatformSettings& settings, const QString& code, const QString& codeVerifier, const QString& authState);
     void appendTokenAudit(PlatformId platform, const QString& action, bool ok, const QString& detail);
     AppSettingsSnapshot buildRuntimeConnectSnapshot(const AppSettingsSnapshot& base) const;
+    void applyRuntimeAccessTokenToAdapter(PlatformId platform, const QString& accessToken);
 
     struct PendingTokenFlowContext {
         QString flow;
@@ -183,11 +188,10 @@ private:
     QTimer* m_liveProbeTimer = nullptr;
     QTimer* m_apiStatusReconcileTimer = nullptr;
     QDateTime m_nextPeriodicChzzkProbeAtUtc;
-    QDateTime m_nextPeriodicYouTubeProbeAtUtc;
-    bool m_pendingYouTubeLiveProbe = false;
     bool m_pendingChzzkLiveProbe = false;
     bool m_pendingYouTubeProfileSync = false;
     bool m_pendingChzzkProfileSync = false;
+    bool m_pendingYouTubeAuthorLookup = false;
 
     ConnectionCoordinator m_connectionCoordinator;
     YouTubeAdapter m_youtubeAdapter;
@@ -235,6 +239,10 @@ private:
     QVector<UnifiedChatMessage> m_chatMessages;
     QHash<QString, ChatterListEntry> m_chatterStats;
     QHash<PlatformId, QString> m_platformStatusCodes;
+    QHash<QString, QString> m_youtubeAuthorHandleCache;
+    QSet<QString> m_youtubeAuthorHandlePending;
+    QStringList m_youtubeAuthorHandleLookupQueue;
+    QTimer* m_youtubeAuthorLookupTimer = nullptr;
     QStringList m_sendHistory;
     int m_sendHistoryIndex = 0;
     QString m_sendHistoryDraft;

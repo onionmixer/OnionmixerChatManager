@@ -314,6 +314,7 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
     m_ytEdtScope->setPlainText(snapshot.youtube.scope);
     m_ytEdtChannelId->setText(snapshot.youtube.channelId);
     m_ytEdtChannelHandle->setText(snapshot.youtube.accountLabel);
+    m_ytEdtLiveVideoOverride->setText(snapshot.youtube.liveVideoIdOverride);
     m_ytLblAccount->setText(snapshot.youtube.channelId.isEmpty() ? QStringLiteral("-") : snapshot.youtube.channelId);
 
     m_chzChkEnabled->setChecked(snapshot.chzzk.enabled);
@@ -526,6 +527,7 @@ void ConfigurationDialog::setYouTubeConfigEditable(bool enabled)
     if (m_ytEdtScope) m_ytEdtScope->setEnabled(enabled);
     if (m_ytEdtChannelId) m_ytEdtChannelId->setEnabled(enabled);
     if (m_ytEdtChannelHandle) m_ytEdtChannelHandle->setEnabled(enabled);
+    if (m_ytEdtLiveVideoOverride) m_ytEdtLiveVideoOverride->setEnabled(enabled);
     if (m_ytBtnTokenRefresh) m_ytBtnTokenRefresh->setEnabled(enabled);
     if (m_ytBtnReauthBrowser) m_ytBtnReauthBrowser->setEnabled(enabled);
     if (m_ytBtnTokenDelete) m_ytBtnTokenDelete->setEnabled(enabled);
@@ -734,6 +736,10 @@ QWidget* ConfigurationDialog::createYouTubeTab()
     m_ytEdtChannelHandle = new QLineEdit(page);
     m_ytEdtChannelHandle->setObjectName(QStringLiteral("ytEdtChannelHandle"));
 
+    m_ytEdtLiveVideoOverride = new QLineEdit(page);
+    m_ytEdtLiveVideoOverride->setObjectName(QStringLiteral("ytEdtLiveVideoOverride"));
+    m_ytEdtLiveVideoOverride->setPlaceholderText(tr("Optional: live watch URL or videoId override"));
+
     form->addRow(QString(), m_ytChkEnabled);
     form->addRow(tr("Client ID"), m_ytEdtClientId);
     form->addRow(tr("Client Secret (Optional)"), m_ytEdtClientSecret);
@@ -743,6 +749,7 @@ QWidget* ConfigurationDialog::createYouTubeTab()
     form->addRow(tr("Scope"), m_ytEdtScope);
     form->addRow(tr("Channel ID"), m_ytEdtChannelId);
     form->addRow(tr("Channel Handle"), m_ytEdtChannelHandle);
+    form->addRow(tr("Live Video URL / ID"), m_ytEdtLiveVideoOverride);
 
     auto* statusBox = new QGroupBox(tr("Token / Account"), page);
     auto* statusGrid = new QGridLayout(statusBox);
@@ -964,6 +971,7 @@ PlatformSettings ConfigurationDialog::collectPlatformSettings(PlatformId platfor
         s.scope = m_ytEdtScope->toPlainText().trimmed();
         s.channelId = m_ytEdtChannelId->text().trimmed();
         s.accountLabel = m_ytEdtChannelHandle->text().trimmed();
+        s.liveVideoIdOverride = m_ytEdtLiveVideoOverride->text().trimmed();
         return s;
     }
 

@@ -20,6 +20,7 @@ public:
     void start(const PlatformSettings& settings) override;
     void stop() override;
     bool isConnected() const override;
+    void applyRuntimeAccessToken(const QString& accessToken);
 
 private:
     void resetProgressAnnouncements();

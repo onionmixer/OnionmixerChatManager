@@ -138,9 +138,12 @@
     <message><source>No token</source><translation>No token</translation></message>
     <message><source>Loaded from vault</source><translation>Loaded from vault</translation></message>
     <message><source>Disabled</source><translation>Disabled</translation></message>
+    <message><source>Disconnected</source><translation>Disconnected</translation></message>
     <message><source>No access token</source><translation>No access token</translation></message>
     <message><source>Live check skipped: token unavailable</source><translation>Live check skipped: token unavailable</translation></message>
     <message><source>Checking live status</source><translation>Checking live status</translation></message>
+    <message><source>Connect required for YouTube live check</source><translation>Connect required for YouTube live check</translation></message>
+    <message><source>Waiting for YouTube adapter live state</source><translation>Waiting for YouTube adapter live state</translation></message>
     <message><source>Failed to create liveBroadcasts request</source><translation>Failed to create liveBroadcasts request</translation></message>
     <message><source>channel_id missing (syncing profile)</source><translation>channel_id missing (syncing profile)</translation></message>
     <message><source>No active broadcast</source><translation>No active broadcast</translation></message>

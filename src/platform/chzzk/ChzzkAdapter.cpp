@@ -126,6 +126,20 @@ PlatformId ChzzkAdapter::platformId() const
     return PlatformId::Chzzk;
 }
 
+void ChzzkAdapter::applyRuntimeAccessToken(const QString& accessToken)
+{
+    const QString trimmed = accessToken.trimmed();
+    if (m_accessToken == trimmed) {
+        return;
+    }
+
+    m_accessToken = trimmed;
+    emit error(platformId(), QStringLiteral("INFO_RUNTIME_TOKEN_UPDATED"),
+        trimmed.isEmpty()
+            ? QStringLiteral("CHZZK runtime access token cleared.")
+            : QStringLiteral("CHZZK runtime access token updated."));
+}
+
 void ChzzkAdapter::resetProgressAnnouncements()
 {
     m_announcedSessionPending = false;

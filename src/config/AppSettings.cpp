@@ -19,6 +19,7 @@ PlatformSettings loadPlatform(QSettings& s, const QString& group)
     ps.channelId = s.value(QStringLiteral("channel_id")).toString();
     ps.channelName = s.value(QStringLiteral("channel_name")).toString();
     ps.accountLabel = s.value(QStringLiteral("account_label")).toString();
+    ps.liveVideoIdOverride = s.value(QStringLiteral("live_video_id_override")).toString();
     s.endGroup();
     return ps;
 }
@@ -36,6 +37,7 @@ void savePlatform(QSettings& s, const QString& group, const PlatformSettings& ps
     s.setValue(QStringLiteral("channel_id"), ps.channelId);
     s.setValue(QStringLiteral("channel_name"), ps.channelName);
     s.setValue(QStringLiteral("account_label"), ps.accountLabel);
+    s.setValue(QStringLiteral("live_video_id_override"), ps.liveVideoIdOverride);
     s.endGroup();
 }
 
