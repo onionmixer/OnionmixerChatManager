@@ -216,6 +216,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_snapshot = m_settings.load();
     m_detailLogEnabled = m_snapshot.detailLogEnabled;
+    m_youtubeAuthorLookupTimer = new QTimer(this);
+    m_youtubeAuthorLookupTimer->setSingleShot(true);
+    connect(m_youtubeAuthorLookupTimer, &QTimer::timeout,
+        this, &MainWindow::flushYouTubeAuthorHandleLookupQueue);
 
     m_connectionCoordinator.bindAdapters({
         { PlatformId::YouTube, &m_youtubeAdapter },
@@ -536,6 +540,9 @@ void MainWindow::onTokenDeleteRequested(PlatformId platform)
     if (!m_tokenVault.read(platform, &record)) {
         const bool cleared = m_tokenVault.clear(platform);
         refreshTokenUi(platform);
+        if (cleared) {
+            applyRuntimeAccessTokenToAdapter(platform, QString());
+        }
         const QString detail = cleared ? tr("No token to revoke. Local token state cleared.")
                                        : tr("No token to revoke. Local clear failed.");
         m_configurationDialog->onTokenActionFinished(platform, cleared, detail);
@@ -547,6 +554,9 @@ void MainWindow::onTokenDeleteRequested(PlatformId platform)
     if (record.accessToken.trimmed().isEmpty() && record.refreshToken.trimmed().isEmpty()) {
         const bool cleared = m_tokenVault.clear(platform);
         refreshTokenUi(platform);
+        if (cleared) {
+            applyRuntimeAccessTokenToAdapter(platform, QString());
+        }
         const QString detail = cleared ? tr("Token already empty. Local token state cleared.")
                                        : tr("Token already empty. Local clear failed.");
         m_configurationDialog->onTokenActionFinished(platform, cleared, detail);
@@ -565,6 +575,9 @@ void MainWindow::onTokenDeleteRequested(PlatformId platform)
         m_pendingTokenRevokes.remove(platform);
         const bool localCleared = m_tokenVault.clear(platform);
         refreshTokenUi(platform);
+        if (localCleared) {
+            applyRuntimeAccessTokenToAdapter(platform, QString());
+        }
         const QString detail = tr("Remote revoke request failed: %1. Local token %2.")
                                    .arg(errorMessage, localCleared ? tr("deleted") : tr("delete failed"));
         m_configurationDialog->onTokenActionFinished(platform, localCleared,
@@ -709,15 +722,13 @@ void MainWindow::onTokenGranted(PlatformId platform,
 
     clearPlatformRuntimeError(platform);
     refreshTokenUi(platform);
+    applyRuntimeAccessTokenToAdapter(platform, accessToken);
     const bool isRefresh = flow == QStringLiteral("refresh_token");
     const QString message = isRefresh ? tr("Silent refresh success") : tr("Interactive re-auth success");
     m_configurationDialog->onTokenActionFinished(platform, true, message);
     appendTokenAudit(platform, flow, true, message);
     m_txtEventLog->append(QStringLiteral("[TOKEN-OK] %1 flow=%2").arg(platformKey(platform), flow));
     reconcileApiStatus();
-    if (platform == PlatformId::YouTube) {
-        m_nextPeriodicYouTubeProbeAtUtc = QDateTime();
-    }
     if (platform == PlatformId::YouTube
         && (flow == QStringLiteral("authorization_code") || flow == QStringLiteral("refresh_token"))) {
         syncYouTubeProfileFromAccessToken(accessToken);
@@ -763,6 +774,9 @@ void MainWindow::onTokenRevoked(PlatformId platform, const QString& flow)
 
     const bool localCleared = m_tokenVault.clear(platform);
     refreshTokenUi(platform);
+    if (localCleared) {
+        applyRuntimeAccessTokenToAdapter(platform, QString());
+    }
     const QString detail = localCleared
         ? tr("Remote token revoke succeeded. Local token deleted.")
         : tr("Remote token revoke succeeded, but local token delete failed.");
@@ -784,6 +798,9 @@ void MainWindow::onTokenRevokeFailed(PlatformId platform, const QString& flow, c
 
     const bool localCleared = m_tokenVault.clear(platform);
     refreshTokenUi(platform);
+    if (localCleared) {
+        applyRuntimeAccessTokenToAdapter(platform, QString());
+    }
     const QString detail = QStringLiteral("%1 (http=%2, code=%3). Local token %4.")
                                .arg(message)
                                .arg(httpStatus)
@@ -865,6 +882,8 @@ void MainWindow::onDisconnectFinished()
     setPlatformRuntimePhase(PlatformId::Chzzk, QStringLiteral("IDLE"));
     clearPlatformRuntimeError(PlatformId::YouTube);
     clearPlatformRuntimeError(PlatformId::Chzzk);
+    setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, tr("Disconnected"));
+    setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::UNKNOWN, tr("Disconnected"));
     m_txtEventLog->append(QStringLiteral("[DISCONNECT] completed"));
     refreshConnectButton();
     reconcileApiStatus();
@@ -881,7 +900,15 @@ void MainWindow::onWarningRaised(const QString& code, const QString& message)
     QString innerCode;
     if (tryPlatformFromCodePrefix(code, &platform, &innerCode)) {
         const QString normalizedInnerCode = innerCode.trimmed().toUpper();
-        if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVECHAT_ID_PENDING")) {
+        if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVE_STATE_UNKNOWN")) {
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, message);
+        } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVE_STATE_CHECKING")) {
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::CHECKING, message);
+        } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVE_STATE_ONLINE")) {
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE, message);
+        } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVE_STATE_OFFLINE")) {
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, message);
+        } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVECHAT_ID_PENDING")) {
             setPlatformStatus(PlatformId::YouTube, QStringLiteral("CONNECTED_NO_LIVECHAT"));
             setPlatformRuntimePhase(PlatformId::YouTube, QStringLiteral("CONNECTED_NO_LIVECHAT"));
             clearPlatformRuntimeError(PlatformId::YouTube);
@@ -889,6 +916,11 @@ void MainWindow::onWarningRaised(const QString& code, const QString& message)
         } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVECHAT_ID_READY")) {
             setPlatformStatus(PlatformId::YouTube, QStringLiteral("CONNECTED"));
             setPlatformRuntimePhase(PlatformId::YouTube, QStringLiteral("CONNECTED"));
+            clearPlatformRuntimeError(PlatformId::YouTube);
+            reconcileApiStatus();
+        } else if (platform == PlatformId::YouTube && normalizedInnerCode == QStringLiteral("INFO_LIVE_DISCOVERY_FALLBACK_SEARCH")) {
+            setPlatformStatus(PlatformId::YouTube, QStringLiteral("CONNECTED_NO_LIVECHAT"));
+            setPlatformRuntimePhase(PlatformId::YouTube, QStringLiteral("CONNECTED_NO_LIVECHAT"));
             clearPlatformRuntimeError(PlatformId::YouTube);
             reconcileApiStatus();
         } else if (platform == PlatformId::Chzzk && normalizedInnerCode == QStringLiteral("INFO_CHZZK_SESSION_PENDING")) {
@@ -906,6 +938,25 @@ void MainWindow::onWarningRaised(const QString& code, const QString& message)
             setPlatformRuntimePhase(PlatformId::Chzzk, QStringLiteral("CONNECTED"));
             clearPlatformRuntimeError(PlatformId::Chzzk);
             reconcileApiStatus();
+        }
+        if (platform == PlatformId::YouTube) {
+            if (normalizedInnerCode == QStringLiteral("LIVE_DISCOVERY_FAILED")
+                || normalizedInnerCode == QStringLiteral("LIVE_CHAT_UNAVAILABLE")
+                || normalizedInnerCode == QStringLiteral("CHAT_RATE_LIMIT")
+                || normalizedInnerCode == QStringLiteral("CHAT_POLL_FAILED")
+                || normalizedInnerCode == QStringLiteral("YT_STREAM_RESOURCE_EXHAUSTED")
+                || normalizedInnerCode == QStringLiteral("YT_STREAM_QUOTA_BACKOFF")
+                || normalizedInnerCode == QStringLiteral("YT_STREAM_PERMISSION_DENIED")
+                || normalizedInnerCode == QStringLiteral("YT_STREAM_INTERNAL")
+                || normalizedInnerCode == QStringLiteral("YT_STREAM_UNAVAILABLE")) {
+                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, message);
+            } else if (normalizedInnerCode == QStringLiteral("INVALID_CONFIG")
+                       || normalizedInnerCode == QStringLiteral("TOKEN_MISSING")
+                       || normalizedInnerCode == QStringLiteral("YT_STREAM_UNAUTHENTICATED")
+                       || normalizedInnerCode == QStringLiteral("YT_STREAM_TOKEN_MISSING")
+                       || normalizedInnerCode == QStringLiteral("YT_STREAM_LIVECHAT_ID_MISSING")) {
+                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, message);
+            }
         }
         if (!normalizedInnerCode.startsWith(QStringLiteral("TRACE_")) && !normalizedInnerCode.startsWith(QStringLiteral("INFO_"))) {
             setPlatformRuntimeError(platform, innerCode, message);
@@ -1503,12 +1554,23 @@ QString MainWindow::displayPlatformPhase(const QString& phase) const
 
 void MainWindow::onChatReceived(const UnifiedChatMessage& message)
 {
+    maybeQueueYouTubeAuthorHandleLookup(message);
     recordChatter(message);
     appendChatMessage(message);
     m_txtEventLog->append(QStringLiteral("[CHAT] %1 author=%2 text=%3")
                               .arg(platformKey(message.platform),
-                                  message.authorName.isEmpty() ? message.authorId : message.authorName,
+                                  displayAuthorLabel(message),
                                   message.text.left(120)));
+    if (m_detailLogEnabled && message.platform == PlatformId::YouTube) {
+        m_txtEventLog->append(QStringLiteral("[CHAT-TRACE] youtube rawDisplayName=%1 rawChannelId=%2 authorId=%3 owner=%4 moderator=%5 sponsor=%6 verified=%7")
+                                  .arg(message.rawAuthorDisplayName.isEmpty() ? QStringLiteral("-") : message.rawAuthorDisplayName,
+                                      message.rawAuthorChannelId.isEmpty() ? QStringLiteral("-") : message.rawAuthorChannelId,
+                                      message.authorId.isEmpty() ? QStringLiteral("-") : message.authorId,
+                                      message.authorIsChatOwner ? QStringLiteral("true") : QStringLiteral("false"),
+                                      message.authorIsChatModerator ? QStringLiteral("true") : QStringLiteral("false"),
+                                      message.authorIsChatSponsor ? QStringLiteral("true") : QStringLiteral("false"),
+                                      message.authorIsVerified ? QStringLiteral("true") : QStringLiteral("false")));
+    }
 }
 
 void MainWindow::appendChatMessage(const UnifiedChatMessage& message)
@@ -1525,10 +1587,7 @@ void MainWindow::appendChatMessage(const UnifiedChatMessage& message)
 
 void MainWindow::recordChatter(const UnifiedChatMessage& message)
 {
-    QString nickname = message.authorName.trimmed();
-    if (nickname.isEmpty()) {
-        nickname = message.authorId.trimmed();
-    }
+    QString nickname = displayAuthorLabel(message).trimmed();
     if (nickname.isEmpty()) {
         nickname = QStringLiteral("-");
     }
@@ -1545,6 +1604,27 @@ void MainWindow::recordChatter(const UnifiedChatMessage& message)
 
     if (m_chatterListDialog && m_chatterListDialog->isVisible()) {
         refreshChatterListDialog();
+    }
+}
+
+void MainWindow::rebuildChatterStatsFromMessages()
+{
+    m_chatterStats.clear();
+    for (const UnifiedChatMessage& message : m_chatMessages) {
+        QString nickname = displayAuthorLabel(message).trimmed();
+        if (nickname.isEmpty()) {
+            nickname = QStringLiteral("-");
+        }
+
+        const QString key = QStringLiteral("%1|%2").arg(platformKey(message.platform), nickname);
+        ChatterListEntry entry = m_chatterStats.value(key);
+        if (entry.count == 0) {
+            entry.platform = message.platform;
+            entry.nickname = nickname;
+        }
+        ++entry.count;
+        entry.lastSeen = message.timestamp.isValid() ? message.timestamp : QDateTime::currentDateTime();
+        m_chatterStats.insert(key, entry);
     }
 }
 
@@ -1593,7 +1673,7 @@ void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message)
         m_tblChat->setItem(row, 0, item);
         QWidget* widget = buildMessengerCellWidget(message, authorDisplay);
         m_tblChat->setCellWidget(row, 0, widget);
-        m_tblChat->setRowHeight(row, qMax(42, widget->sizeHint().height() + 4));
+        m_tblChat->setRowHeight(row, qMax(38, widget->sizeHint().height()));
         return;
     }
 
@@ -1611,20 +1691,20 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
     wrap->setFocusPolicy(Qt::NoFocus);
 
     auto* layout = new QVBoxLayout(wrap);
-    layout->setContentsMargins(8, 6, 8, 6);
+    layout->setContentsMargins(8, 3, 8, 3);
     layout->setSpacing(1);
     layout->setAlignment(Qt::AlignTop);
 
     auto* badge = new QLabel(wrap);
-    const int badgeSize = message.platform == PlatformId::Chzzk ? 18 : 22;
+    const int badgeSize = message.platform == PlatformId::Chzzk ? 11 : 13;
     badge->setFixedSize(badgeSize, badgeSize);
     badge->setAlignment(Qt::AlignCenter);
     badge->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     badge->setFocusPolicy(Qt::NoFocus);
     badge->setStyleSheet(message.platform == PlatformId::YouTube
-            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:12px;")
+            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:8px;")
                   .arg(badgeSize / 2)
-            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:10px;")
+            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:7px;")
                   .arg(badgeSize / 2));
     badge->setText(message.platform == PlatformId::YouTube ? QStringLiteral("▶") : QStringLiteral("Z"));
     auto* badgeWrap = new QWidget(wrap);
@@ -1639,14 +1719,14 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
     lblAuthor->setFocusPolicy(Qt::NoFocus);
     lblAuthor->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     lblAuthor->setStyleSheet(message.platform == PlatformId::YouTube
-            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:19px;")
-            : QStringLiteral("color:#D17A00; font-weight:700; font-size:19px;"));
+            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:11px;")
+            : QStringLiteral("color:#D17A00; font-weight:700; font-size:11px;"));
 
     auto* lblMessage = new QLabel(message.text.toHtmlEscaped(), wrap);
     lblMessage->setWordWrap(true);
     lblMessage->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     lblMessage->setFocusPolicy(Qt::NoFocus);
-    lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:18px; font-weight:600;"));
+    lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:11px; font-weight:600;"));
 
     auto* headLayout = new QHBoxLayout;
     headLayout->setContentsMargins(0, 0, 0, 0);
@@ -1688,6 +1768,37 @@ void MainWindow::rebuildChatTable()
 
 QString MainWindow::messengerAuthorLabel(const UnifiedChatMessage& message) const
 {
+    return displayAuthorLabel(message);
+}
+
+QString MainWindow::displayAuthorLabel(const UnifiedChatMessage& message) const
+{
+    if (message.platform == PlatformId::YouTube) {
+        const QString selfHandle = normalizeYouTubeHandle(m_snapshot.youtube.accountLabel);
+        if (!selfHandle.isEmpty() && !m_snapshot.youtube.channelId.trimmed().isEmpty()
+            && message.authorId.trimmed() == m_snapshot.youtube.channelId.trimmed()) {
+            return selfHandle;
+        }
+
+        const QString authorId = message.authorId.trimmed();
+        if (!authorId.isEmpty()) {
+            const QString cachedHandle = normalizeYouTubeHandle(m_youtubeAuthorHandleCache.value(authorId));
+            if (!cachedHandle.isEmpty()) {
+                return cachedHandle;
+            }
+        }
+
+        const QString rawHandle = normalizeYouTubeHandle(message.rawAuthorDisplayName);
+        if (!rawHandle.isEmpty()) {
+            return rawHandle;
+        }
+
+        const QString normalizedAuthorName = normalizeYouTubeHandle(message.authorName);
+        if (!normalizedAuthorName.isEmpty()) {
+            return normalizedAuthorName;
+        }
+    }
+
     const QString authorName = message.authorName.trimmed();
     if (!authorName.isEmpty()) {
         return authorName;
@@ -1697,6 +1808,147 @@ QString MainWindow::messengerAuthorLabel(const UnifiedChatMessage& message) cons
         return authorId;
     }
     return QStringLiteral("-");
+}
+
+QString MainWindow::normalizeYouTubeHandle(const QString& value) const
+{
+    QString normalized = value.trimmed();
+    if (normalized.isEmpty()) {
+        return QString();
+    }
+    if (normalized.startsWith(QStringLiteral("@"))) {
+        return normalized;
+    }
+    if (normalized.contains(QLatin1Char(' '))) {
+        return QString();
+    }
+    return QStringLiteral("@%1").arg(normalized);
+}
+
+void MainWindow::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message)
+{
+    if (message.platform != PlatformId::YouTube) {
+        return;
+    }
+
+    const QString authorId = message.authorId.trimmed();
+    if (authorId.isEmpty()) {
+        return;
+    }
+
+    const QString rawHandle = normalizeYouTubeHandle(message.rawAuthorDisplayName);
+    if (!rawHandle.isEmpty()) {
+        m_youtubeAuthorHandleCache.insert(authorId, rawHandle);
+        return;
+    }
+
+    if (m_youtubeAuthorHandleCache.contains(authorId) || m_youtubeAuthorHandlePending.contains(authorId)) {
+        return;
+    }
+
+    m_youtubeAuthorHandlePending.insert(authorId);
+    m_youtubeAuthorHandleLookupQueue.append(authorId);
+    if (m_youtubeAuthorLookupTimer && !m_youtubeAuthorLookupTimer->isActive()) {
+        m_youtubeAuthorLookupTimer->start(150);
+    }
+}
+
+void MainWindow::flushYouTubeAuthorHandleLookupQueue()
+{
+    if (m_pendingYouTubeAuthorLookup || m_youtubeAuthorHandleLookupQueue.isEmpty()) {
+        return;
+    }
+
+    TokenRecord record;
+    if (!m_tokenVault.read(PlatformId::YouTube, &record) || record.accessToken.trimmed().isEmpty()) {
+        return;
+    }
+
+    QStringList authorIds;
+    while (!m_youtubeAuthorHandleLookupQueue.isEmpty() && authorIds.size() < 50) {
+        const QString id = m_youtubeAuthorHandleLookupQueue.takeFirst().trimmed();
+        if (!id.isEmpty() && !authorIds.contains(id)) {
+            authorIds.append(id);
+        }
+    }
+    if (authorIds.isEmpty()) {
+        return;
+    }
+
+    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/channels"));
+    QUrlQuery query(url);
+    query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
+    query.addQueryItem(QStringLiteral("id"), authorIds.join(QLatin1Char(',')));
+    query.addQueryItem(QStringLiteral("maxResults"), QString::number(authorIds.size()));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
+
+    QNetworkReply* reply = m_networkAccessManager.get(req);
+    if (!reply) {
+        for (const QString& id : authorIds) {
+            m_youtubeAuthorHandlePending.remove(id);
+        }
+        return;
+    }
+    m_pendingYouTubeAuthorLookup = true;
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, authorIds]() {
+        m_pendingYouTubeAuthorLookup = false;
+
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        QJsonObject obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) {
+            obj = doc.object();
+        }
+
+        QSet<QString> unresolved = QSet<QString>(authorIds.begin(), authorIds.end());
+        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
+        if (reply->error() == QNetworkReply::NoError && httpOk) {
+            const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
+            for (const QJsonValue& value : items) {
+                const QJsonObject item = value.toObject();
+                const QString channelId = item.value(QStringLiteral("id")).toString().trimmed();
+                const QString customUrl = item.value(QStringLiteral("snippet")).toObject().value(QStringLiteral("customUrl")).toString().trimmed();
+                if (!channelId.isEmpty()) {
+                    unresolved.remove(channelId);
+                }
+                const QString normalized = normalizeYouTubeHandle(customUrl);
+                if (!channelId.isEmpty() && !normalized.isEmpty()) {
+                    m_youtubeAuthorHandleCache.insert(channelId, normalized);
+                }
+            }
+
+            bool updated = false;
+            for (UnifiedChatMessage& message : m_chatMessages) {
+                if (message.platform != PlatformId::YouTube) {
+                    continue;
+                }
+                const QString cachedHandle = m_youtubeAuthorHandleCache.value(message.authorId.trimmed());
+                if (!cachedHandle.isEmpty() && message.rawAuthorDisplayName != cachedHandle) {
+                    message.rawAuthorDisplayName = cachedHandle;
+                    updated = true;
+                }
+            }
+            if (updated) {
+                rebuildChatterStatsFromMessages();
+                rebuildChatTable();
+                refreshChatterListDialog();
+                updateActionPanel();
+            }
+        }
+
+        for (const QString& id : authorIds) {
+            m_youtubeAuthorHandlePending.remove(id);
+        }
+        if (!m_youtubeAuthorHandleLookupQueue.isEmpty() && m_youtubeAuthorLookupTimer) {
+            m_youtubeAuthorLookupTimer->start(150);
+        }
+        reply->deleteLater();
+    });
 }
 
 void MainWindow::onChatSelectionChanged()
@@ -1876,7 +2128,7 @@ void MainWindow::executeAction(const QString& actionId)
     const ActionExecutionResult result = m_actionExecutor.execute(actionId, *msg, currentConnections());
     if (result.ok) {
         m_txtEventLog->append(QStringLiteral("[ACTION-OK] %1 platform=%2 author=%3 messageId=%4 msg=%5")
-                                  .arg(actionId, platformKey(msg->platform), msg->authorId, msg->messageId, result.message));
+                                  .arg(actionId, platformKey(msg->platform), displayAuthorLabel(*msg), msg->messageId, result.message));
         statusBar()->showMessage(tr("Action executed: %1").arg(actionId), 2500);
         return;
     }
@@ -2220,11 +2472,8 @@ void MainWindow::initializeLiveProbe()
 
 void MainWindow::onLiveProbeTimeout()
 {
+    probeLiveStatus(PlatformId::YouTube);
     const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
-    if (!m_nextPeriodicYouTubeProbeAtUtc.isValid() || nowUtc >= m_nextPeriodicYouTubeProbeAtUtc) {
-        probeLiveStatus(PlatformId::YouTube);
-        m_nextPeriodicYouTubeProbeAtUtc = nowUtc.addSecs(60);
-    }
     if (!m_nextPeriodicChzzkProbeAtUtc.isValid() || nowUtc >= m_nextPeriodicChzzkProbeAtUtc) {
         probeLiveStatus(PlatformId::Chzzk);
         m_nextPeriodicChzzkProbeAtUtc = nowUtc.addSecs(10);
@@ -2256,9 +2505,15 @@ void MainWindow::probeLiveStatus(PlatformId platform)
     }
 
     if (platform == PlatformId::YouTube) {
-        m_nextPeriodicYouTubeProbeAtUtc = QDateTime::currentDateTimeUtc().addSecs(60);
-        if (!m_pendingYouTubeLiveProbe) {
-            probeYouTubeLiveStatus(record.accessToken);
+        const QString phase = m_platformRuntimeStates.value(PlatformId::YouTube).phase.trimmed().toUpper();
+        const bool adapterManaged = m_youtubeAdapter.isConnected()
+            || phase == QStringLiteral("STARTING")
+            || phase == QStringLiteral("CONNECTED")
+            || phase == QStringLiteral("CONNECTED_NO_LIVECHAT");
+        if (!adapterManaged) {
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, tr("Connect required for YouTube live check"));
+        } else if (m_liveStates.value(PlatformId::YouTube, LiveBroadcastState::UNKNOWN) == LiveBroadcastState::UNKNOWN) {
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::CHECKING, tr("Waiting for YouTube adapter live state"));
         }
         return;
     }
@@ -2267,178 +2522,6 @@ void MainWindow::probeLiveStatus(PlatformId platform)
     if (!m_pendingChzzkLiveProbe) {
         probeChzzkLiveStatus(record.accessToken);
     }
-}
-
-void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
-{
-    const QString token = accessToken.trimmed();
-    if (token.isEmpty()) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, tr("No access token"));
-        return;
-    }
-
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/liveBroadcasts"));
-    QUrlQuery query(url);
-    query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet,status"));
-    query.addQueryItem(QStringLiteral("mine"), QStringLiteral("true"));
-    query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("50"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(token).toUtf8());
-
-    QNetworkReply* reply = m_networkAccessManager.get(req);
-    if (!reply) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, tr("Failed to create liveBroadcasts request"));
-        return;
-    }
-    m_pendingYouTubeLiveProbe = true;
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, token]() {
-        m_pendingYouTubeLiveProbe = false;
-
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray body = reply->readAll();
-
-        QJsonObject obj;
-        const QJsonDocument doc = QJsonDocument::fromJson(body);
-        if (doc.isObject()) {
-            obj = doc.object();
-        }
-
-        const QJsonObject error = obj.value(QStringLiteral("error")).toObject();
-        const QString apiMessage = error.value(QStringLiteral("message")).toString().trimmed();
-        const int apiCode = error.value(QStringLiteral("code")).toInt();
-        const bool hasApiCode = error.value(QStringLiteral("code")).isDouble();
-        const QString apiReason = extractYouTubeErrorReason(obj);
-
-        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
-        if (reply->error() != QNetworkReply::NoError || !httpOk) {
-            const QString detail = QStringLiteral("http=%1 apiCode=%2 reason=%3 msg=%4")
-                                       .arg(httpStatus)
-                                       .arg(hasApiCode ? QString::number(apiCode) : QStringLiteral("-"))
-                                       .arg(apiReason.isEmpty() ? QStringLiteral("-") : apiReason,
-                                           apiMessage.isEmpty() ? reply->errorString() : apiMessage);
-            if (isQuotaExceededMessage(detail)) {
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
-                reply->deleteLater();
-                return;
-            }
-            const QString channelId = m_snapshot.youtube.channelId.trimmed();
-            if (!token.isEmpty() && !channelId.isEmpty()) {
-                probeYouTubeLiveStatusBySearch(token);
-            } else if (!token.isEmpty()) {
-                syncYouTubeProfileFromAccessToken(token);
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::CHECKING, tr("channel_id missing (syncing profile)"));
-            } else {
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
-            }
-            reply->deleteLater();
-            return;
-        }
-
-        const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
-        QString liveTitle;
-        bool isLive = false;
-        for (const QJsonValue& v : items) {
-            const QJsonObject item = v.toObject();
-            const QJsonObject status = item.value(QStringLiteral("status")).toObject();
-            const QString lifeCycle = status.value(QStringLiteral("lifeCycleStatus")).toString().trimmed().toLower();
-            if (lifeCycle != QStringLiteral("live") && lifeCycle != QStringLiteral("live_starting")) {
-                continue;
-            }
-            const QJsonObject snippet = item.value(QStringLiteral("snippet")).toObject();
-            liveTitle = snippet.value(QStringLiteral("title")).toString().trimmed();
-            isLive = true;
-            break;
-        }
-
-        if (!isLive) {
-            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, tr("No active broadcast"));
-            reply->deleteLater();
-            return;
-        }
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE,
-            liveTitle.isEmpty() ? tr("Active broadcast detected") : liveTitle);
-        reply->deleteLater();
-    });
-}
-
-void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
-{
-    const QString token = accessToken.trimmed();
-    const QString channelId = m_snapshot.youtube.channelId.trimmed();
-    if (token.isEmpty() || channelId.isEmpty()) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, tr("channel_id missing"));
-        return;
-    }
-
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/search"));
-    QUrlQuery query(url);
-    query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet"));
-    query.addQueryItem(QStringLiteral("channelId"), channelId);
-    query.addQueryItem(QStringLiteral("eventType"), QStringLiteral("live"));
-    query.addQueryItem(QStringLiteral("type"), QStringLiteral("video"));
-    query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("1"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(token).toUtf8());
-    QNetworkReply* reply = m_networkAccessManager.get(req);
-    if (!reply) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, tr("Failed to create search request"));
-        return;
-    }
-    m_pendingYouTubeLiveProbe = true;
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        m_pendingYouTubeLiveProbe = false;
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray body = reply->readAll();
-
-        QJsonObject obj;
-        const QJsonDocument doc = QJsonDocument::fromJson(body);
-        if (doc.isObject()) {
-            obj = doc.object();
-        }
-
-        const QJsonObject error = obj.value(QStringLiteral("error")).toObject();
-        const QString apiMessage = error.value(QStringLiteral("message")).toString().trimmed();
-        const int apiCode = error.value(QStringLiteral("code")).toInt();
-        const bool hasApiCode = error.value(QStringLiteral("code")).isDouble();
-        const QString apiReason = extractYouTubeErrorReason(obj);
-
-        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
-        if (reply->error() != QNetworkReply::NoError || !httpOk) {
-            const QString detail = QStringLiteral("fallback http=%1 apiCode=%2 reason=%3 msg=%4")
-                                       .arg(httpStatus)
-                                       .arg(hasApiCode ? QString::number(apiCode) : QStringLiteral("-"))
-                                       .arg(apiReason.isEmpty() ? QStringLiteral("-") : apiReason,
-                                           apiMessage.isEmpty() ? reply->errorString() : apiMessage);
-            if (isQuotaExceededMessage(detail)) {
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
-                reply->deleteLater();
-                return;
-            }
-            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
-            reply->deleteLater();
-            return;
-        }
-
-        const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
-        if (items.isEmpty()) {
-            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, tr("No live search result"));
-            reply->deleteLater();
-            return;
-        }
-
-        const QJsonObject first = items.first().toObject();
-        const QJsonObject snippet = first.value(QStringLiteral("snippet")).toObject();
-        const QString title = snippet.value(QStringLiteral("title")).toString().trimmed();
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE,
-            title.isEmpty() ? tr("Live search result found") : title);
-        reply->deleteLater();
-    });
 }
 
 void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
@@ -2677,47 +2760,18 @@ void MainWindow::syncYouTubeProfileFromAccessToken(const QString& accessToken)
             return;
         }
 
-        AppSettingsSnapshot updated = m_snapshot;
-        bool changed = false;
-        if (updated.youtube.channelId != channelId) {
-            updated.youtube.channelId = channelId;
-            changed = true;
-        }
-        if (!channelName.isEmpty() && updated.youtube.channelName != channelName) {
-            updated.youtube.channelName = channelName;
-            changed = true;
-        }
-        if (!channelHandle.isEmpty() && updated.youtube.accountLabel != channelHandle) {
-            updated.youtube.accountLabel = channelHandle;
-            changed = true;
-        } else if (!channelName.isEmpty() && updated.youtube.accountLabel != channelName) {
-            updated.youtube.accountLabel = channelName;
-            changed = true;
-        }
-
-        if (!changed) {
-            m_txtEventLog->append(QStringLiteral("[YOUTUBE-PROFILE] channels.mine synchronized (no changes)"));
-            reply->deleteLater();
-            return;
-        }
-
-        if (!m_settings.save(updated)) {
-            m_txtEventLog->append(QStringLiteral("[YOUTUBE-PROFILE-FAIL] Failed to persist channel profile to config/app.ini"));
-            reply->deleteLater();
-            return;
-        }
-
-        m_snapshot = updated;
-        if (m_configurationDialog) {
-            m_configurationDialog->setSnapshot(m_snapshot);
+        // Runtime-only: cache the bot's own profile for author display (never persist to INI)
+        const QString selfHandle = !channelHandle.isEmpty() ? channelHandle : channelName;
+        const QString normalizedSelfHandle = normalizeYouTubeHandle(selfHandle);
+        if (!channelId.isEmpty() && !normalizedSelfHandle.isEmpty()) {
+            m_youtubeAuthorHandleCache.insert(channelId, normalizedSelfHandle);
         }
 
         const QString synced = QStringLiteral("channelId=%1 handle=%2 channelName=%3")
-                                   .arg(updated.youtube.channelId,
-                                       updated.youtube.accountLabel.isEmpty() ? QStringLiteral("-") : updated.youtube.accountLabel,
-                                       updated.youtube.channelName.isEmpty() ? QStringLiteral("-") : updated.youtube.channelName);
+                                   .arg(channelId,
+                                       selfHandle.isEmpty() ? QStringLiteral("-") : selfHandle,
+                                       channelName.isEmpty() ? QStringLiteral("-") : channelName);
         m_txtEventLog->append(QStringLiteral("[YOUTUBE-PROFILE] channels.mine synchronized %1").arg(synced));
-        statusBar()->showMessage(tr("YouTube profile synchronized from channels.mine"), 3000);
         reply->deleteLater();
     });
 }
@@ -2792,43 +2846,11 @@ void MainWindow::syncChzzkProfileFromAccessToken(const QString& accessToken)
             return;
         }
 
-        AppSettingsSnapshot updated = m_snapshot;
-        bool changed = false;
-        if (updated.chzzk.channelId != channelId) {
-            updated.chzzk.channelId = channelId;
-            changed = true;
-        }
-        if (!channelName.isEmpty() && updated.chzzk.channelName != channelName) {
-            updated.chzzk.channelName = channelName;
-            changed = true;
-        }
-        if (!channelName.isEmpty() && updated.chzzk.accountLabel != channelName) {
-            updated.chzzk.accountLabel = channelName;
-            changed = true;
-        }
-
-        if (!changed) {
-            m_txtEventLog->append(QStringLiteral("[CHZZK-PROFILE] users/me synchronized (no changes)"));
-            reply->deleteLater();
-            return;
-        }
-
-        if (!m_settings.save(updated)) {
-            m_txtEventLog->append(QStringLiteral("[CHZZK-PROFILE-FAIL] Failed to persist channel profile to config/app.ini"));
-            reply->deleteLater();
-            return;
-        }
-
-        m_snapshot = updated;
-        if (m_configurationDialog) {
-            m_configurationDialog->setSnapshot(m_snapshot);
-        }
-
+        // Runtime-only: log the profile for diagnostics (never persist to INI)
         const QString synced = QStringLiteral("channelId=%1 channelName=%2")
-                                   .arg(updated.chzzk.channelId,
-                                       updated.chzzk.channelName.isEmpty() ? QStringLiteral("-") : updated.chzzk.channelName);
+                                   .arg(channelId,
+                                       channelName.isEmpty() ? QStringLiteral("-") : channelName);
         m_txtEventLog->append(QStringLiteral("[CHZZK-PROFILE] users/me synchronized %1").arg(synced));
-        statusBar()->showMessage(tr("CHZZK profile synchronized from users/me"), 3000);
         reply->deleteLater();
     });
 }
@@ -2921,6 +2943,15 @@ AppSettingsSnapshot MainWindow::buildRuntimeConnectSnapshot(const AppSettingsSna
         snapshot.chzzk.runtimeAccessToken.clear();
     }
     return snapshot;
+}
+
+void MainWindow::applyRuntimeAccessTokenToAdapter(PlatformId platform, const QString& accessToken)
+{
+    if (platform == PlatformId::YouTube) {
+        m_youtubeAdapter.applyRuntimeAccessToken(accessToken);
+        return;
+    }
+    m_chzzkAdapter.applyRuntimeAccessToken(accessToken);
 }
 
 bool MainWindow::startTokenRefreshFlow(PlatformId platform, const PlatformSettings& settings, const TokenRecord& currentRecord)

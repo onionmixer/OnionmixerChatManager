@@ -37,9 +37,11 @@ Qt5 기반 데스크톱 클라이언트로 다음 기능을 제공하는 봇/운
 
 ### 3.1 YouTube
 
-- 현재 라이브 채팅 수신은 `liveChatMessages.streamList` 사용이 가장 적합하다. 공식 문서상 이 방식은 저지연으로 신규 메시지를 푸시하며, 일반 polling 보다 quota 소모와 과도한 요청 위험을 줄이는 방향으로 안내된다.
-- 폴백으로 `liveChatMessages.list` 를 사용할 수 있으며, 응답의 `pollingIntervalMillis` 를 반드시 따라야 한다.
-- 활성 방송 탐색은 `liveBroadcasts.list?mine=true&broadcastStatus=active` 로 시작하는 것이 적절하다.
+- 라이브 채팅 수신의 1순위 방식은 YouTube InnerTube API를 활용한 웹 스크래핑이다. YouTube 프론트엔드가 내부적으로 사용하는 `live_chat` 페이지의 continuation 기반 폴링으로, Google Cloud API quota를 소모하지 않는다. OBS Studio도 동일한 `live_chat?is_popout=1&v={videoId}` 페이지를 CEF 브라우저로 로드하여 quota 0으로 채팅을 표시한다.
+- 2순위 폴백으로 `liveChatMessages.streamList` (gRPC server-streaming) 를 사용할 수 있다.
+- 3순위 최종 폴백으로 `liveChatMessages.list` REST API 폴링을 사용하며, 응답의 `pollingIntervalMillis` 를 반드시 따라야 한다.
+- 메시지 전송, 삭제, 제재 등 운영 액션만 YouTube Data API v3를 사용한다.
+- 활성 방송 탐색은 `liveBroadcasts.list?mine=true&broadcastStatus=active` 로 시작하고, 봇 계정과 방송 채널이 다른 경우 `search?channelId={id}&eventType=live` 로 폴백한다.
 - 방송의 채팅 식별자는 `liveBroadcast.snippet.liveChatId` 를 통해 확보한다.
 - 메시지 전송은 `liveChatMessages.insert` 로 가능하다.
 - 데스크톱 OAuth는 Google 권장 방식상 브라우저 기반 Authorization Code + PKCE + loopback redirect(`127.0.0.1`) 조합으로 설계하는 것이 안전하다.
@@ -62,6 +64,7 @@ Qt5 기반 데스크톱 클라이언트로 다음 기능을 제공하는 봇/운
 - `QSettings` 는 `IniFormat` 을 공식 지원하므로 ID, 채널 설정, UI 옵션 저장에 적합하다.
 - Qt 5.15 의 `QOAuth2AuthorizationCodeFlow` 는 Authorization Code flow 와 refresh 를 지원한다.
 - 다만 Google native app 권장 PKCE 파라미터를 Qt5 기본 API가 직접 노출하지 않으므로, YouTube OAuth 는 수동 구현 또는 wrapper 확장이 더 안전하다.
+- `liveChatMessages.streamList` 공식 가이드는 gRPC server-streaming 클라이언트를 전제로 설명한다. 현재 Qt5/QNetwork 기반 코드에는 gRPC 스택이 없으므로, 이 기능은 `QNetworkAccessManager` 확장이 아니라 별도 gRPC 수신 계층 추가 작업으로 봐야 한다.
 - 따라서 OAuth 처리 계층은 플랫폼별로 분리하고, 공통 UI만 공유하는 구조가 맞다.
 
 ### 3.4 운영자 액션 조사 결과
@@ -709,6 +712,8 @@ signals:
 
 - 활성 방송이 없으면 polling 연결을 시도하지 않고 대기 상태로 전환
 - `streamList` 실패 시 `list + pollingIntervalMillis` 폴백 제공
+- `streamList` 는 `youtube.googleapis.com:443` 대상 장기 gRPC 연결로 설계하고, 현재의 `QNetworkAccessManager` polling 경로와 분리한다.
+- `streamList` 응답의 `nextPageToken` 을 메모리에 유지하여 재연결 시 이어받기(resume) 처리한다.
 - 봇 발송이 필요하면 `liveChatMessages.insert` 추가
 - 메시지 삭제 버튼은 `messageId` 가 있는 메시지에만 활성화한다.
 - 임시 timeout / 영구 ban 은 `authorId` 와 `liveChatId` 로 직접 수행할 수 있다.
@@ -1486,6 +1491,7 @@ public:
 - `streamList` 연결
 - 메시지 파싱 및 통합 모델 변환
 - 실패 시 폴백 polling
+- gRPC 채널/재연결/이어받기(`nextPageToken`) 검증
 
 산출물:
 - YouTube 채팅 수신
@@ -1964,6 +1970,358 @@ struct ValidationResult {
 - `4xx` 중 명백한 설정/권한 오류(`401/403/400`)는 즉시 실패
 - 사용자 취소/수동 disconnect 상황은 재시도 금지
 
+### 22.4 YouTube `streamList` 적용 정책
+
+- 1차 수신 경로는 `liveChatMessages.streamList` 로 한다.
+- `streamList` 는 공식 문서 기준 `server-streaming` 방식이며, 신규 메시지를 push 형태로 전달받는다.
+- 초기 연결은 최근 채팅 히스토리를 일부 반환하고, 이후 같은 연결에서 신규 메시지가 이어진다.
+- 연결이 끊기면 마지막 `nextPageToken` 으로 재접속하여 이어받는다.
+- `streamList` 가 일시 실패한 경우에만 짧은 재연결을 수행하고, 그 이후에도 실패하면 `list + pollingIntervalMillis` 폴백으로 전환한다.
+- `quotaExceeded` 또는 `rateLimitExceeded` 는 즉시 `list` 폴백으로 난사하지 않고, 우선 `streamList` 재연결 백오프를 적용한다.
+- `liveChatEnded`, `liveChatDisabled`, `liveChatNotFound` 는 `liveChatId` 폐기 후 라이브 탐색 단계로 되돌린다.
+
+### 22.5 YouTube `streamList` 기술 제약
+
+- 공식 가이드는 gRPC `secure_channel("dns:///youtube.googleapis.com:443")` 기반 예제를 제공한다.
+- 현재 저장소는 Qt5 + `QNetworkAccessManager` 중심이며, `grpc++` / `protobuf` / Qt6 `QGrpc` 계열 의존성이 없다.
+- 따라서 구현은 아래 둘 중 하나여야 한다.
+  - 저장소 내부에 `grpc++` 기반 C++ 클라이언트를 직접 추가
+  - 별도 helper process 로 gRPC 수신 후 Qt5 메인 프로세스에 전달
+- 현재 프로젝트 구조와 단순성을 기준으로는 `grpc++` 기반의 내부 C++ 클라이언트 추가가 우선안이다.
+- 이유:
+  - 별도 프로세스 IPC 설계보다 상태 일관성이 좋다.
+  - 기존 `YouTubeAdapter`의 상태 머신과 직접 결합하기 쉽다.
+  - 메시지/오류/재연결 이벤트를 `signal/slot`으로 바로 올릴 수 있다.
+
+## 28. YouTube `streamList` 설계 반영
+
+### 28.1 공식 문서 확인 결과
+
+- `liveChatMessages.streamList` 는 공식 문서상 “가장 효율적인” 라이브 채팅 소비 방식으로 설명된다.
+- 메시지는 polling 대신 server-streaming 연결을 통해 low-latency 로 전달된다.
+- 첫 연결은 최근 히스토리를 보내고, 이후 신규 메시지를 같은 연결에 이어서 push 한다.
+- 각 응답에는 `nextPageToken` 이 포함되며, 연결이 끊긴 뒤 이를 이용해 재개할 수 있다.
+- 공식 예제는 Python gRPC 클라이언트와 `stream_list.proto` 를 제공한다.
+- 가이드상 인증은 `OAuth 2.0 access token` 또는 `API key` 둘 다 예시가 있지만, 본 프로젝트는 운영 액션과 계정 일관성을 위해 OAuth access token만 사용한다.
+- 공식 proto 주석상 `maxResults` 필드는 streaming RPC 에서 사용되지 않는다.
+
+### 28.2 현재 코드와의 차이
+
+- 현재 [YouTubeAdapter.cpp](/mnt/USERS/onion/DATA_ORIGN/Workspace/BotManager/src/platform/youtube/YouTubeAdapter.cpp) 는 `liveChat/messages.list` polling 구조다.
+- live 상태 탐색은 adapter 내부로 정리했지만, 실제 채팅 수신은 아직 HTTP GET + `pollingIntervalMillis` 의존이다.
+- 따라서 `streamList` 전환은 “기존 함수 교체” 수준이 아니라 “수신 transport 교체”다.
+
+### 28.3 신규 클래스 설계
+
+- `YouTubeAdapter`
+  - 역할 유지
+  - 인증/토큰/라이브 탐색/liveChatId/state orchestration 담당
+  - 수신 transport 선택 및 오류 정책 담당
+
+- `YouTubeStreamListClient`
+  - 신규 추가
+  - 책임:
+    - gRPC 채널 생성
+    - `StreamList` 호출
+    - 응답 스트림 파싱
+    - `nextPageToken` 관리
+    - transport 수준 오류 코드 보고
+  - 출력:
+    - `messagesReceived(QVector<UnifiedChatMessage>)`
+    - `streamCheckpoint(QString nextPageToken)`
+    - `streamEnded(QString reason)`
+    - `streamFailed(QString code, QString detail)`
+
+- `YouTubePollingFallbackClient`
+  - 기존 `requestLiveChatMessages()` 로직을 사실상 분리한 클래스 또는 adapter 내부 fallback 모드로 유지
+  - `streamList` 미가용 또는 반복 실패 시에만 사용
+
+### 28.4 상태 머신 반영
+
+`YouTubeAdapter` 상태를 다음처럼 정리한다.
+
+1. `DISCOVERING_LIVE`
+- `liveBroadcasts` / `search` / `videos.liveStreamingDetails` 로 `liveChatId` 확보
+
+2. `LIVECHAT_READY`
+- `liveChatId` 확보 완료
+- 아직 메시지 transport 미연결
+
+3. `STREAM_CONNECTING`
+- `YouTubeStreamListClient::start(liveChatId, accessToken, nextPageToken)`
+
+4. `STREAMING`
+- gRPC server-streaming 연결 활성
+- 수신 메시지를 `UnifiedChatMessage`로 변환 후 UI에 전달
+
+5. `STREAM_BACKOFF`
+- transport/network 오류
+- 1s, 2s, 4s, 8s, 15s 재연결
+
+6. `POLLING_FALLBACK`
+- gRPC 초기화 실패, 빌드 미지원, 연속 실패 초과
+- 기존 `liveChatMessages.list` 사용
+
+7. `OFFLINE`
+- `liveChatEnded`, `liveChatDisabled`, `liveChatNotFound`, `offlineAt` 등
+- `liveChatId` 폐기 후 discovery 단계로 복귀
+
+### 28.5 메시지 이어받기 규칙
+
+- `streamList` 응답마다 `nextPageToken` 을 갱신한다.
+- 메모리 내 `m_nextPageToken` 과 별도 `m_streamResumeToken` 을 분리해 보관한다.
+- 재연결 시 마지막 `nextPageToken` 을 `pageToken` 으로 넣는다.
+- 앱 재시작 후에는 이전 세션의 `pageToken` 을 복구하지 않는다.
+  - 이유:
+    - 오래된 continuation token 의 유효성을 보장하기 어렵다.
+    - 세션 경계가 달라질 수 있다.
+    - 중복/누락보다 “현재 시점부터 안정 수신”이 우선이다.
+
+### 28.6 빌드/의존성 반영
+
+- 신규 의존성:
+  - `protobuf`
+  - `grpc++`
+  - `grpc++_reflection` 불필요
+- 저장소에 `third_party/youtube/stream_list.proto` 또는 `proto/stream_list.proto` 추가
+- CMake 단계:
+  - `protoc` 코드 생성
+  - `grpc_cpp_plugin` 코드 생성
+  - 생성된 `.pb.cc`, `.grpc.pb.cc` 를 앱 타깃에 포함
+- 빌드 플래그:
+  - `BOTMANAGER_ENABLE_YT_STREAMLIST=ON` 기본
+  - 의존성 미검출 시 자동으로 polling fallback 빌드 유지
+
+### 28.7 오류 처리 정책
+
+- `PERMISSION_DENIED` / HTTP 403 `forbidden`
+  - 사용자 권한 문제
+  - 재시도 없음
+
+- `INVALID_ARGUMENT` / HTTP 400
+  - `liveChatId`, `pageToken` 불량
+  - `pageToken` 비우고 1회 재시도 후 실패 시 discovery 복귀
+
+- `LIVE_CHAT_DISABLED` / `LIVE_CHAT_ENDED`
+  - 즉시 `OFFLINE`
+  - `liveChatId` 폐기
+
+- `NOT_FOUND` / `liveChatNotFound`
+  - `liveChatId` 폐기
+  - discovery 복귀
+
+- `RESOURCE_EXHAUSTED` / `rateLimitExceeded`
+  - `streamList` 재연결 백오프
+  - 즉시 polling 난사 금지
+
+- transport disconnect
+  - 마지막 `nextPageToken` 기준 재접속
+
+### 28.8 구현 순서
+
+1. `stream_list.proto` 추가 및 CMake 초안 작성
+2. `YouTubeStreamListClient` 단독 클래스 작성
+3. gRPC response -> `UnifiedChatMessage` 매핑 작성
+4. `YouTubeAdapter`에 transport 상태머신 연결
+5. `requestLiveChatMessages()` 를 fallback 경로로 축소
+6. 실제 방송으로 `streamList` 수신 검증
+7. quota/log 비교
+
+### 28.9 검증 기준
+
+1. 방송 ON 상태에서 `liveChatId` 확보 후 `STREAM_CONNECTING -> STREAMING` 전환
+2. 신규 채팅이 polling 지연 없이 수신됨
+3. 네트워크 끊김 후 `nextPageToken` 기반 재연결
+4. `streamList` 실패 시 fallback polling 정상 동작
+5. YouTube quota 사용량이 기존 polling 단독 대비 유의미하게 감소
+
+### 28.10 수명주기/소유권 보강
+
+- `YouTubeAdapter` 가 `YouTubeStreamListClient` 의 단일 owner 여야 한다.
+- `connect/start()` 마다 새로운 stream client 인스턴스를 만들지 않고, adapter 내부에 1개를 보유하고 세션만 재시작한다.
+- `stop()` 호출 시 아래 순서를 강제한다.
+  1. 신규 재연결 타이머 중지
+  2. gRPC read loop 취소
+  3. in-flight callback 무효화(`generation` 또는 session id 증가)
+  4. resume token / liveChatId 정리 여부 결정
+- `disconnect` 와 `token refresh` 중에는 이전 stream callback 이 UI로 늦게 도착해도 무시되어야 한다.
+
+### 28.11 스레드/이벤트 루프 모델
+
+- gRPC read loop 는 Qt GUI thread 에 직접 올리지 않는다.
+- 권장안:
+  - `YouTubeStreamListClient` 는 worker thread 에서 blocking read 를 수행
+  - 파싱 완료된 메시지 묶음만 `Qt::QueuedConnection` 으로 adapter에 전달
+- 이유:
+  - 장기 stream read 가 GUI/event loop 응답성을 해치면 안 된다.
+  - disconnect 시 취소 지점이 명확해야 한다.
+- 금지:
+  - GUI thread 에서 blocking `Read()` 또는 busy loop 수행
+
+### 28.12 토큰 갱신과 stream 재인증 규칙
+
+- `streamList` 연결은 access token 으로 인증되므로, token refresh 후 기존 stream 을 계속 유지할 수 있다고 가정하면 안 된다.
+- 정책:
+  - access token 갱신 성공 시 현재 stream 을 정상 종료하고 새 token 으로 재연결
+  - refresh 도중에는 fallback polling 으로 임시 전환하지 않는다.
+  - refresh 실패 시 `AUTH_REQUIRED` 또는 기존 token state 규칙에 따라 상위 상태를 갱신한다.
+- 구현 보강:
+  - `MainWindow::onTokenGranted(...)` 에서 token vault 저장 직후 running adapter 에 새 access token 을 즉시 주입한다.
+  - `YouTubeAdapter` 는 실행 중 `streamList` 가 있으면 현재 stream 을 취소하고 같은 `liveChatId` / resume token 기준으로 재연결한다.
+  - `ChzzkAdapter` 는 기존 websocket/session 을 강제 종료하지 않고, 이후 세션 재인증부터 새 token 을 사용한다.
+- 이유:
+  - 서로 다른 token 으로 열린 장기 stream 의 서버 측 유효기간을 보장할 수 없다.
+
+### 28.13 중복 제거 / 순서 보장
+
+- `streamList` 와 fallback polling 모두 동일한 dedup 규칙을 써야 한다.
+- dedup key:
+  - 1차: `liveChatMessage.id`
+  - 2차 보조: `snippet.publishedAt + authorChannelId + displayMessage`
+- `m_seenMessageIds` 는 transport 공통 캐시로 유지한다.
+- `stream -> polling`, `polling -> stream` 전환 시에도 이 캐시를 유지하여 중복 표시를 막는다.
+- UI에 전달되는 메시지 순서는 “플랫폼 수신 시각”이 아니라 “YouTube publishedAt 오름차순” 기준을 유지한다.
+
+### 28.14 fallback 전환 규칙 보강
+
+- `streamList` 실패 즉시 polling 으로 떨어지지 않는다.
+- hysteresis 규칙:
+  - 같은 `liveChatId` 에 대해 연속 `streamList` 실패 3회 이상일 때만 polling fallback 진입
+  - polling fallback 진입 후 최소 5분간은 stream 재시도 금지
+  - 새 `liveChatId` 를 얻은 경우 hysteresis 카운터 초기화
+- 이유:
+  - stream 장애 직후 polling 과 stream 재연결이 서로 경쟁하면 quota/상태가 다시 불안정해진다.
+
+### 28.15 `offlineAt` / 종료 감지 규칙
+
+- `streamList` 응답의 `offlineAt` 이 존재하면 즉시 `OFFLINE` 후보 상태로 본다.
+- 단, 마지막 히스토리 전달 구간이 있을 수 있으므로 다음 규칙을 사용한다.
+  - `offlineAt` 수신
+  - 남은 items 처리
+  - stream 종료 또는 후속 응답 없음 확인
+  - 그 후 `liveChatId` 폐기 및 discovery 복귀
+- 이유:
+  - 방송 종료 직후 남아 있는 마지막 이벤트를 놓치지 않기 위함이다.
+
+### 28.16 메시지 파싱 계약
+
+- `streamList` 와 `list` 는 논리적으로 같은 `LiveChatMessage` 리소스를 반환하므로, 파싱 함수는 transport 공통으로 둔다.
+- 권장 함수:
+  - `parseYouTubeLiveChatMessage(const ProtoOrJsonMessage& src) -> UnifiedChatMessage`
+  - 또는
+  - `buildUnifiedMessageFromYouTubeFields(...)`
+- transport별 차이는 “응답 읽기/역직렬화”까지만 두고, 이후 메시지 매핑/요약/role 추론은 공통화한다.
+- 이유:
+  - 이벤트 타입 추가 시 stream/list 양쪽에 중복 수정이 생기지 않게 하기 위함이다.
+
+### 28.17 빌드/배포 현실성 보강
+
+- Linux 개발 환경에서 `grpc++`, `protobuf`, `protoc`, `grpc_cpp_plugin` 버전 불일치 가능성이 높다.
+- CMake는 다음을 명확히 분리해야 한다.
+  - 개발 의존성 검출 실패: 빌드 자체는 성공, YouTube polling fallback only
+  - streamList 활성 빌드 성공: gRPC 경로 포함
+- `About` 또는 event log 에 현재 모드를 남긴다.
+  - `YOUTUBE_TRANSPORT=STREAMLIST`
+  - `YOUTUBE_TRANSPORT=POLLING_FALLBACK`
+  - `YOUTUBE_TRANSPORT=POLLING_ONLY_BUILD`
+- 이유:
+  - 사용자가 quota 이슈를 볼 때 현재 어떤 transport 로 동작 중인지 즉시 알아야 한다.
+
+### 28.18 실패 보고/로그 표준
+
+- 최소 로그 코드:
+  - `YT_STREAM_CONNECTING`
+  - `YT_STREAM_CONNECTED`
+  - `YT_STREAM_CHECKPOINT`
+  - `YT_STREAM_DISCONNECTED`
+  - `YT_STREAM_BACKOFF`
+  - `YT_STREAM_FALLBACK_POLLING`
+  - `YT_STREAM_RESUME_TOKEN_RESET`
+- 원문 서버 메시지는 그대로 유지하되, 앱 생성 요약 코드만 추가한다.
+- Detail Log OFF 에서는 checkpoint flood 를 출력하지 않는다.
+- 보강:
+  - `YT_STREAM_CONNECTED` 는 worker thread 시작 시점이 아니라 첫 streaming 응답(checkpoint 또는 message batch) 수신 시점에만 확정 로그로 본다.
+  - `INFO_RUNTIME_TOKEN_UPDATED` 는 token refresh/re-auth 성공 후 adapter hot-apply 여부를 추적하는 로그로 사용한다.
+
+### 28.20 quota-safe `streamList` 오류 처리 보강
+
+- `gRPC RESOURCE_EXHAUSTED` 는 YouTube quota/rate limit 가능성이 높으므로 일반 transport 오류와 분리한다.
+- 정책:
+  - `YT_STREAM_RESOURCE_EXHAUSTED`
+    - 연속 실패 카운터에 포함하지 않는다.
+    - 즉시 polling fallback 으로 전환하지 않는다.
+    - 300초 backoff 후 다시 `streamList` 를 우선 시도한다.
+- 이유:
+  - quota/rate 상황에서 polling fallback 으로 내리면 오히려 HTTP 호출량이 늘어날 수 있다.
+
+### 28.19 테스트 항목 보강
+
+1. 방송 시작 전 `Connect`
+- `DISCOVERING_LIVE` 유지
+- stream/polling 둘 다 시작하지 않음
+
+2. 방송 시작 직후
+- `liveChatId` 획득
+- `STREAM_CONNECTING -> STREAMING`
+
+3. 방송 중 네트워크 단절
+- read loop 종료
+- backoff 후 same `pageToken` 재개 시도
+
+4. stream 3회 연속 실패
+- `POLLING_FALLBACK` 진입
+- 5분 hysteresis 동안 stream 재시도 금지
+
+5. access token refresh 발생
+- 기존 stream 종료
+- 새 token 으로 재연결
+
+6. 방송 종료
+- `offlineAt` 또는 `liveChatEnded`
+
+### 28.21 YouTube `liveVideoId` 수동 override
+
+- 일부 채널/계정 조합에서는 `liveBroadcasts(mine=true)` 또는 `search(forMine=true,eventType=live)` 가 현재 방송을 안정적으로 노출하지 않을 수 있다.
+- 우회 정책:
+  - 설정값 `live_video_id_override` 지원
+  - 값은 YouTube watch URL 또는 raw `videoId`
+  - connect 시 이 값이 있으면 자동 탐색보다 우선해서 `videos.list(part=liveStreamingDetails,snippet&id=...)` 로 직접 `activeLiveChatId` 확인
+- 목적:
+  - owner 계정인데도 automatic discovery 가 false-negative 를 내는 케이스를 실전에서 우회
+- 마지막 이벤트 처리 후 `OFFLINE`
+
+### 28.22 YouTube handle 기반 web live URL resolver
+
+- 일부 채널에서는 `liveBroadcasts(mine=true)` / `search(forMine=true,eventType=live)` / uploads playlist 기반 탐색이 현재 방송을 안정적으로 노출하지 않을 수 있다.
+- 보조 탐색 정책:
+  1. `accountLabel(channel handle)` 를 `@handle` 형태로 정규화
+  2. `https://www.youtube.com/@handle/live` 접근 후 redirect/final URL 기준으로 `videoId` 추출
+  3. 실패 시 `https://www.youtube.com/@handle/streams` 페이지의 최근 stream/video 후보 `videoId` 추출
+  4. 실패 시 `https://www.youtube.com/channel/<channelId>/live`
+  5. 실패 시 `https://www.youtube.com/embed/live_stream?channel=<channelId>`
+  6. 실패 시 public channel feed `https://www.youtube.com/feeds/videos.xml?channel_id=<channelId>` 에서 최근 `videoId` 후보 추출
+  7. 후보 `videoId` 는 반드시 `videos.list(part=liveStreamingDetails,snippet,status)` 로 다시 검증
+- 목적:
+  - API-only discovery false-negative를 줄이되, 최종 확정은 공식 API `liveStreamingDetails.activeLiveChatId` 로 유지
+- 주의:
+  - `@handle/live`, `@handle/streams` 는 제품 동작 기반 보조 경로이며, 공식 API 스펙 보장 대상은 아니다.
+  - HTML/redirect 기반 candidate 추출은 best-effort 이며, 실제 채팅 연결 전에는 반드시 `videos.list` 검증이 필요하다.
+  - `videoId` 를 이미 확보한 경우에는 `videos.status.privacyStatus` 로 `public/unlisted/private` 진단이 가능하다.
+  - 반대로 자동 탐색 단계에서 `videoId` 자체를 확보하지 못하면 visibility 는 판정할 수 없다.
+  - `unlisted/private` 라이브는 공개 채널 surface(`@handle/live`, `/streams`, RSS 등)에 노출되지 않을 수 있으므로, 이 경우 자동 발견보다 `Live Video URL / ID` 수동 입력이 우선 경로가 된다.
+
+### 28.20 구현 범위 결정
+
+- 1차 구현 범위:
+  - 내부 `grpc++` 클라이언트 방식
+  - Linux 기준 빌드 우선
+  - fallback polling 유지
+- 1차 제외:
+  - 별도 helper process 방식
+  - Windows/macOS 패키징 자동화
+  - 앱 재시작 후 resume token 복구
+- 이 범위를 고정해야 실제 구현이 과도하게 커지지 않는다.
+
 ### 22.3 자동 복구 정책
 
 - `autoReconnect=true`일 때만 네트워크 단절 후 재연결 수행
@@ -2340,3 +2698,114 @@ struct ValidationResult {
 4. `Shift+Space` 줄바꿈이 정상 동작한다.
 5. `Ctrl+Up/Down` history 탐색이 정상 동작한다.
 6. 선택된 채팅이 없어도 `Send Message`는 Composer 텍스트 기준으로 동작한다.
+
+## 30. YouTube 채팅 수신 InnerTube 전환 및 Live Discovery 개선
+
+> 작업일: 2026-04-11
+
+### 30.1 배경
+
+YouTube Data API v3의 `liveChatMessages.list` 폴링과 gRPC `streamList` 방식은 모두 Google Cloud 프로젝트 quota를 소모한다. 실 운용 중 API quota 소진 문제가 발생하여, OBS Studio 소스코드 분석을 기반으로 quota-free 채팅 수신 방식을 도입한다.
+
+OBS Studio는 `https://www.youtube.com/live_chat?is_popout=1&v={videoId}` 페이지를 CEF(Chromium Embedded Framework) 브라우저에 직접 로드하여 quota 0으로 채팅을 표시한다. BotManager는 프로그래밍적 메시지 파싱이 필요하므로 CEF 대신 YouTube InnerTube API를 직접 HTTP 호출하는 방식을 채택한다.
+
+### 30.2 InnerTube API 개요
+
+InnerTube API는 YouTube 웹사이트 프론트엔드가 내부적으로 사용하는 비공식 API이다. YouTube Data API v3(`googleapis.com`)와 완전히 별개이며, Google Cloud quota를 소모하지 않는다.
+
+- **초기 페이지**: `GET https://www.youtube.com/live_chat?v={videoId}&is_popout=1`
+  - HTML 내 `ytInitialData` JSON에서 초기 메시지 + continuation token 추출
+  - `ytcfg`에서 `INNERTUBE_API_KEY`, `INNERTUBE_CLIENT_VERSION` 추출
+- **폴링 엔드포인트**: `POST https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key={apiKey}`
+  - request body: `{ "context": { "client": { "clientName": "WEB", "clientVersion": "..." } }, "continuation": "..." }`
+  - response: `continuationContents.liveChatContinuation.actions[]` 에 메시지 포함
+  - `continuations[].{invalidationContinuationData|timedContinuationData}.timeoutMs` 로 다음 폴링 간격 결정
+
+주의: InnerTube는 비공식 API이므로 YouTube가 언제든 구조를 변경할 수 있다. 이에 대비하여 gRPC streamList와 REST API 폴링을 폴백으로 유지한다.
+
+### 30.3 Transport 우선순위
+
+```
+1. InnerTube WebClient (YouTubeLiveChatWebClient)  — quota 0, 권장
+2. gRPC streamList (YouTubeStreamListClient)        — quota 소모, 저지연
+3. REST API polling (requestLiveChatMessages)        — quota 소모 많음, 최후 폴백
+```
+
+InnerTube 실패 3회 시 300초간 gRPC/REST로 폴백. gRPC 실패 시 REST로 추가 폴백.
+
+### 30.4 InnerTube 메시지 파싱
+
+InnerTube 응답의 메시지 렌더러(`liveChatTextMessageRenderer` 등)를 기존 `UnifiedChatMessage` 구조로 변환한다.
+
+| UnifiedChatMessage 필드 | InnerTube 경로 |
+|---|---|
+| `messageId` | `renderer.id` |
+| `authorId` | `renderer.authorExternalChannelId` |
+| `authorName` | `renderer.authorName.simpleText` |
+| `text` | `renderer.message.runs[]` 결합 (text + emoji shortcut) |
+| `timestamp` | `renderer.timestampUsec` (μs → ms 변환) |
+| `authorIsChatOwner` | `authorBadges[].icon.iconType == "OWNER"` |
+| `authorIsChatModerator` | `authorBadges[].icon.iconType == "MODERATOR"` |
+| `authorIsChatSponsor` | `authorBadges[].customThumbnail` 존재 여부 |
+
+지원 렌더러 타입:
+- `liveChatTextMessageRenderer` — 일반 메시지
+- `liveChatPaidMessageRenderer` — Super Chat
+- `liveChatPaidStickerRenderer` — Super Sticker
+- `liveChatMembershipItemRenderer` — 멤버십
+- `liveChatSponsorshipsGiftPurchaseAnnouncementRenderer` — 기프트 구매
+- `liveChatSponsorshipsGiftRedemptionAnnouncementRenderer` — 기프트 수령
+
+### 30.5 구현 파일
+
+| 파일 | 역할 |
+|---|---|
+| `src/platform/youtube/YouTubeLiveChatWebClient.h` | InnerTube 웹 채팅 클라이언트 (신규) |
+| `src/platform/youtube/YouTubeLiveChatWebClient.cpp` | HTML 파싱, continuation 폴링, 메시지 추출 (신규) |
+| `src/platform/youtube/YouTubeChatMessageParser.h` | `parseInnerTubeChatRenderer()` 선언 추가 |
+| `src/platform/youtube/YouTubeChatMessageParser.cpp` | InnerTube renderer → UnifiedChatMessage 변환 |
+| `src/platform/youtube/YouTubeAdapter.h` | `m_webChatClient`, `m_discoveredVideoId` 추가 |
+| `src/platform/youtube/YouTubeAdapter.cpp` | transport 우선순위 변경, WebClient 시그널 연결 |
+
+### 30.6 Live Discovery 개선 (동시 적용)
+
+#### 30.6.1 `broadcastStatus=active` 추가
+
+OBS Studio 방식과 동일하게 `liveBroadcasts.list` 호출 시 `broadcastStatus=active` 파라미터를 추가한다.
+
+#### 30.6.2 봇 계정 ≠ 방송 채널 지원
+
+INI에 설정된 `channel_id`/`account_label`이 봇 계정이 아닌 방송 채널을 가리킬 수 있다.
+- `mine=true` 기반 API가 빈 결과를 반환하면 `channelId` 기반 search API로 폴백
+- `isThirdPartyChannel()` 헬퍼로 판단 (`m_configuredChannelId` 또는 `m_configuredChannelHandle`이 비어있지 않으면 true)
+
+#### 30.6.3 프로필 자동 동기화 INI 보호
+
+`syncYouTubeProfileFromAccessToken()` / `syncChzzkProfileFromAccessToken()`이 토큰 갱신 시 API 결과로 INI 설정을 덮어쓰는 문제를 수정.
+- API 결과는 런타임 캐시(`m_youtubeAuthorHandleCache`)에만 저장
+- `m_snapshot` 및 INI 파일은 변경하지 않음
+- Configuration 창에서 사용자가 수동으로 Apply한 경우만 INI에 반영
+
+#### 30.6.4 Web Scraping 재시도
+
+`m_bootstrapHandleWebFallbackTried` 일회성 플래그를 `m_nextWebFallbackAllowedAtUtc` 쿨다운 타이머로 교체.
+180초 간격으로 `/@handle/live` web scraping 체인을 재시도한다.
+
+#### 30.6.5 `requestOwnChannelProfile()` 설정값 보호
+
+INI에 이미 `channel_id`/`account_label`이 설정되어 있으면 API 응답으로 덮어쓰지 않는다.
+- `m_configuredChannelId`가 비어있을 때만 `m_channelId` 갱신
+- `m_configuredChannelHandle`이 비어있을 때만 `m_channelHandle` 갱신
+
+### 30.7 API 사용 정책 요약
+
+| 기능 | 방식 | Quota |
+|---|---|---|
+| 채팅 수신 | InnerTube web scraping | 0 |
+| 채팅 수신 (폴백 1) | gRPC streamList | 소모 |
+| 채팅 수신 (폴백 2) | REST API polling | 소모 많음 |
+| 메시지 전송 | `liveChatMessages.insert` | 소모 (건당) |
+| 메시지 삭제 | `liveChatMessages.delete` | 소모 (건당) |
+| 유저 제재 | `liveChatBans.insert` | 소모 (건당) |
+| 방송 탐색 | `liveBroadcasts.list` / `search.list` | 소모 (연결 시 1회) |
+| 프로필 조회 | `channels.list` | 소모 (연결 시 1회) |
