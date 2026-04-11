@@ -1,12 +1,14 @@
 #include "ui/MainWindow.h"
 
 #include "auth/PkceUtil.h"
+#include "i18n/AppLanguage.h"
 #include "ui/ConfigurationDialog.h"
 
 #include <algorithm>
 #include <QAction>
 #include <QAbstractItemView>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QEvent>
@@ -26,6 +28,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QShortcut>
@@ -45,6 +48,11 @@
 #include <QHeaderView>
 
 namespace {
+QString mainWindowText(const char* sourceText)
+{
+    return QCoreApplication::translate("MainWindow", sourceText);
+}
+
 QString normalizeGoogleOAuthClientId(const QString& raw)
 {
     QString value = raw.trimmed();
@@ -75,16 +83,16 @@ bool isLikelyGoogleOAuthClientId(const QString& clientId)
 QString googleClientIdValidationMessage(const QString& parsedClientId)
 {
     if (parsedClientId.isEmpty()) {
-        return QStringLiteral("YouTube client_id format invalid. Parsed value is empty.");
+        return mainWindowText("YouTube client_id format invalid. Parsed value is empty.");
     }
     if (!parsedClientId.contains(QStringLiteral("googleusercontent.com"), Qt::CaseInsensitive)
         && parsedClientId.contains('.')) {
-        return QStringLiteral(
+        return mainWindowText(
             "YouTube client_id format invalid. parsed=%1 (looks like bundle/package id). "
             "Use OAuth client_id ending with *.googleusercontent.com")
             .arg(parsedClientId);
     }
-    return QStringLiteral("YouTube client_id format invalid. expected=*.googleusercontent.com parsed=%1")
+    return mainWindowText("YouTube client_id format invalid. expected=*.googleusercontent.com parsed=%1")
         .arg(parsedClientId);
 }
 
@@ -107,7 +115,7 @@ bool looksLikeYouTubeClientSecretMismatch(const QString& errorCode, const QStrin
 
 QString buildTokenFailureDetailWithGuidance(PlatformId platform, const QString& flow, const QString& errorCode, const QString& message, int httpStatus)
 {
-    const QString base = QStringLiteral("%1 (http=%2)").arg(message).arg(httpStatus);
+    const QString base = mainWindowText("%1 (http=%2)").arg(message).arg(httpStatus);
     if (platform != PlatformId::YouTube || flow != QStringLiteral("authorization_code")) {
         return base;
     }
@@ -115,7 +123,7 @@ QString buildTokenFailureDetailWithGuidance(PlatformId platform, const QString& 
         return base;
     }
 
-    return base + QStringLiteral(
+    return base + mainWindowText(
                       "\nHint: YouTube AUTH_CODE_GRANT failed at token exchange."
                       "\n- Use OAuth client type: Desktop app"
                       "\n- Use client_id ending with .apps.googleusercontent.com"
@@ -305,6 +313,14 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     return QMainWindow::eventFilter(watched, event);
 }
 
+void MainWindow::changeEvent(QEvent* event)
+{
+    if (event && event->type() == QEvent::LanguageChange) {
+        retranslateUi();
+    }
+    QMainWindow::changeEvent(event);
+}
+
 void MainWindow::onConnectToggleClicked()
 {
     switch (m_connectionCoordinator.state()) {
@@ -333,8 +349,8 @@ void MainWindow::onToggleChatViewClicked()
     rebuildChatTable();
     statusBar()->showMessage(
         m_chatViewMode == ChatViewMode::Messenger
-            ? QStringLiteral("Chat view: Messenger")
-            : QStringLiteral("Chat view: Table"),
+            ? tr("Chat view: Messenger")
+            : tr("Chat view: Table"),
         2000);
 }
 
@@ -358,41 +374,56 @@ void MainWindow::onResetChatterList()
 {
     m_chatterStats.clear();
     refreshChatterListDialog();
-    statusBar()->showMessage(QStringLiteral("Chatter list reset."), 2000);
+    statusBar()->showMessage(tr("Chatter list reset."), 2000);
 }
 
 void MainWindow::onConfigApplyRequested(const AppSettingsSnapshot& snapshot)
 {
     if (!m_settings.save(snapshot)) {
-        QMessageBox::warning(this, QStringLiteral("Configuration"), QStringLiteral("Failed to save config/app.ini"));
+        QMessageBox::warning(this, tr("Configuration"), tr("Failed to save config/app.ini"));
         return;
     }
+
+    const bool languageChanged = AppLanguage::normalizeLanguage(m_snapshot.language) != AppLanguage::normalizeLanguage(snapshot.language);
+    const bool reopenConfiguration = m_configurationDialog && m_configurationDialog->isVisible();
+    const bool reopenChatterList = m_chatterListDialog && m_chatterListDialog->isVisible();
 
     m_snapshot = snapshot;
     m_detailLogEnabled = snapshot.detailLogEnabled;
     m_txtEventLog->append(QStringLiteral("[CONFIG] Applied and saved."));
-    statusBar()->showMessage(QStringLiteral("Configuration updated. Reconnect to apply running session."), 4000);
+    if (languageChanged) {
+        QString languageError;
+        AppLanguage::applyLanguage(*qApp, snapshot.language, &languageError);
+        retranslateUi();
+        recreateAuxiliaryDialogs(reopenConfiguration, reopenChatterList);
+        const QString message = languageError.isEmpty()
+            ? tr("Configuration updated. Language applied to the UI.")
+            : tr("Configuration updated, but translation load failed: %1").arg(languageError);
+        statusBar()->showMessage(message, 5000);
+    } else {
+        statusBar()->showMessage(tr("Configuration updated. Reconnect to apply running session."), 4000);
+    }
     onLiveProbeTimeout();
 }
 
 void MainWindow::onTokenRefreshRequested(PlatformId platform, const PlatformSettings& settings)
 {
     if (m_pendingTokenFlows.contains(platform)) {
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Another token operation is in progress"));
-        appendTokenAudit(platform, QStringLiteral("token_refresh"), false, QStringLiteral("Another token operation is in progress"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Another token operation is in progress"));
+        appendTokenAudit(platform, QStringLiteral("token_refresh"), false, tr("Another token operation is in progress"));
         return;
     }
 
     TokenRecord record;
     if (!m_tokenVault.read(platform, &record) || record.refreshToken.trimmed().isEmpty()) {
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, QStringLiteral("No refresh token. Browser re-auth required."));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Refresh token not found"));
-        appendTokenAudit(platform, QStringLiteral("token_refresh"), false, QStringLiteral("Refresh token not found"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, tr("No refresh token. Browser re-auth required."));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Refresh token not found"));
+        appendTokenAudit(platform, QStringLiteral("token_refresh"), false, tr("Refresh token not found"));
         return;
     }
 
     m_configurationDialog->onTokenOperationStarted(platform, QStringLiteral("refresh_token"));
-    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, QStringLiteral("Refreshing token..."));
+    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, tr("Refreshing token..."));
     if (!startTokenRefreshFlow(platform, settings, record)) {
         return;
     }
@@ -401,16 +432,16 @@ void MainWindow::onTokenRefreshRequested(PlatformId platform, const PlatformSett
 void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformSettings& settings)
 {
     if (m_pendingTokenFlows.contains(platform) || m_oauthLocalServer.hasActiveSession(platform)) {
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Another token operation is in progress"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("Another token operation is in progress"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Another token operation is in progress"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("Another token operation is in progress"));
         return;
     }
 
     if (settings.clientId.trimmed().isEmpty() || settings.redirectUri.trimmed().isEmpty() || settings.scope.trimmed().isEmpty()
         || settings.authEndpoint.trimmed().isEmpty() || settings.tokenEndpoint.trimmed().isEmpty()) {
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, QStringLiteral("Missing required OAuth fields"));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth blocked by invalid config"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("Invalid OAuth configuration"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, tr("Missing required OAuth fields"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth blocked by invalid config"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("Invalid OAuth configuration"));
         return;
     }
     if (platform == PlatformId::YouTube && !isLikelyGoogleOAuthClientId(settings.clientId)) {
@@ -418,16 +449,16 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
         const QString validationMessage = googleClientIdValidationMessage(normalized);
         m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED,
             validationMessage);
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth blocked by invalid client_id"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth blocked by invalid client_id"));
         appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, validationMessage);
         return;
     }
 
     const QUrl redirectUri(settings.redirectUri);
     if (!redirectUri.isValid() || redirectUri.scheme() != QStringLiteral("http") || redirectUri.host() != QStringLiteral("127.0.0.1") || redirectUri.port() <= 0) {
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, QStringLiteral("redirect_uri must be http://127.0.0.1:{port}/..."));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth blocked by invalid redirect_uri"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("Invalid redirect_uri"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, tr("redirect_uri must be http://127.0.0.1:{port}/..."));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth blocked by invalid redirect_uri"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("Invalid redirect_uri"));
         return;
     }
 
@@ -438,9 +469,9 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
         codeVerifier = pkce::generateCodeVerifier();
         codeChallenge = pkce::makeCodeChallengeS256(codeVerifier);
         if (codeVerifier.trimmed().isEmpty() || codeChallenge.trimmed().isEmpty()) {
-            m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, QStringLiteral("Failed to prepare PKCE"));
-            m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth failed"));
-            appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("Failed to prepare PKCE"));
+            m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, tr("Failed to prepare PKCE"));
+            m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth failed"));
+            appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("Failed to prepare PKCE"));
             return;
         }
     }
@@ -454,7 +485,7 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
     QString startError;
     if (!m_oauthLocalServer.startSession(session, &startError)) {
         m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, startError);
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Failed to start OAuth callback server"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Failed to start OAuth callback server"));
         appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, startError);
         return;
     }
@@ -470,7 +501,7 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
     const QUrl authUrl = buildAuthorizationUrl(platform, settings, state, codeChallenge);
     if (!authUrl.isValid()) {
         m_oauthLocalServer.cancelSession(platform, QStringLiteral("OAUTH_AUTH_URL_INVALID"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("Invalid authorize URL"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("Invalid authorize URL"));
         return;
     }
     if (platform == PlatformId::Chzzk && authUrl.host().contains(QStringLiteral("example.com"))) {
@@ -479,7 +510,7 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
 
     if (!QDesktopServices::openUrl(authUrl)) {
         m_oauthLocalServer.cancelSession(platform, QStringLiteral("OAUTH_BROWSER_OPEN_FAILED"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("Failed to open system browser"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("Failed to open system browser"));
         return;
     }
 
@@ -487,7 +518,7 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
     setPlatformRuntimePhase(platform, QStringLiteral("STARTING"));
     clearPlatformRuntimeError(platform);
     m_configurationDialog->onTokenOperationStarted(platform, QStringLiteral("interactive_auth"));
-    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, QStringLiteral("Browser opened. Waiting callback..."));
+    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, tr("Browser opened. Waiting callback..."));
     m_txtEventLog->append(QStringLiteral("[OAUTH] %1 browser auth started").arg(platformKey(platform)));
     reconcileApiStatus();
 }
@@ -495,7 +526,7 @@ void MainWindow::onInteractiveAuthRequested(PlatformId platform, const PlatformS
 void MainWindow::onTokenDeleteRequested(PlatformId platform)
 {
     if (m_pendingTokenFlows.contains(platform) || m_pendingTokenRevokes.value(platform, false)) {
-        const QString detail = QStringLiteral("Another token operation is in progress");
+        const QString detail = tr("Another token operation is in progress");
         m_configurationDialog->onTokenActionFinished(platform, false, detail);
         appendTokenAudit(platform, QStringLiteral("token_revoke"), false, detail);
         return;
@@ -505,28 +536,28 @@ void MainWindow::onTokenDeleteRequested(PlatformId platform)
     if (!m_tokenVault.read(platform, &record)) {
         const bool cleared = m_tokenVault.clear(platform);
         refreshTokenUi(platform);
-        const QString detail = cleared ? QStringLiteral("No token to revoke. Local token state cleared.")
-                                       : QStringLiteral("No token to revoke. Local clear failed.");
+        const QString detail = cleared ? tr("No token to revoke. Local token state cleared.")
+                                       : tr("No token to revoke. Local clear failed.");
         m_configurationDialog->onTokenActionFinished(platform, cleared, detail);
         appendTokenAudit(platform, QStringLiteral("token_revoke"), cleared, detail);
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Token missing"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Token missing"));
         return;
     }
 
     if (record.accessToken.trimmed().isEmpty() && record.refreshToken.trimmed().isEmpty()) {
         const bool cleared = m_tokenVault.clear(platform);
         refreshTokenUi(platform);
-        const QString detail = cleared ? QStringLiteral("Token already empty. Local token state cleared.")
-                                       : QStringLiteral("Token already empty. Local clear failed.");
+        const QString detail = cleared ? tr("Token already empty. Local token state cleared.")
+                                       : tr("Token already empty. Local clear failed.");
         m_configurationDialog->onTokenActionFinished(platform, cleared, detail);
         appendTokenAudit(platform, QStringLiteral("token_revoke"), cleared, detail);
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Token empty"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Token empty"));
         return;
     }
 
     const PlatformSettings settings = settingsFor(platform);
     m_configurationDialog->onTokenOperationStarted(platform, QStringLiteral("token_revoke"));
-    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, QStringLiteral("Revoking token..."));
+    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, tr("Revoking token..."));
     m_pendingTokenRevokes.insert(platform, true);
 
     QString errorMessage;
@@ -534,14 +565,14 @@ void MainWindow::onTokenDeleteRequested(PlatformId platform)
         m_pendingTokenRevokes.remove(platform);
         const bool localCleared = m_tokenVault.clear(platform);
         refreshTokenUi(platform);
-        const QString detail = QStringLiteral("Remote revoke request failed: %1. Local token %2.")
-                                   .arg(errorMessage, localCleared ? QStringLiteral("deleted") : QStringLiteral("delete failed"));
+        const QString detail = tr("Remote revoke request failed: %1. Local token %2.")
+                                   .arg(errorMessage, localCleared ? tr("deleted") : tr("delete failed"));
         m_configurationDialog->onTokenActionFinished(platform, localCleared,
-            localCleared ? QStringLiteral("Local token deleted (remote revoke skipped)")
-                         : QStringLiteral("Token delete failed"));
+            localCleared ? tr("Local token deleted (remote revoke skipped)")
+                         : tr("Token delete failed"));
         appendTokenAudit(platform, QStringLiteral("token_revoke"), false, detail);
         if (localCleared) {
-            setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Token deleted locally"));
+            setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Token deleted locally"));
         }
     }
 }
@@ -556,7 +587,7 @@ void MainWindow::onPlatformConfigValidationRequested(PlatformId platform, const 
 
     const QString target = platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK");
     m_txtEventLog->append(QStringLiteral("[CONFIG-TEST] %1 -> %2").arg(target, ok ? QStringLiteral("OK") : QStringLiteral("FAIL")));
-    statusBar()->showMessage(QStringLiteral("%1 config test: %2").arg(target, ok ? QStringLiteral("OK") : QStringLiteral("FAIL")), 3000);
+    statusBar()->showMessage(tr("%1 config test: %2").arg(target, ok ? tr("OK") : tr("FAIL")), 3000);
 }
 
 void MainWindow::onOAuthCallbackReceived(PlatformId platform, const QString& code, const QString& state, const QString& errorCode, const QString& errorDescription)
@@ -570,10 +601,10 @@ void MainWindow::onOAuthCallbackReceived(PlatformId platform, const QString& cod
 
     if (expectedState.isEmpty() || state != expectedState) {
         m_authInProgress.insert(platform, false);
-        setPlatformRuntimeError(platform, QStringLiteral("OAUTH_STATE_MISMATCH"), QStringLiteral("OAuth state mismatch"));
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, QStringLiteral("OAuth state mismatch"));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth failed"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("OAuth state mismatch"));
+        setPlatformRuntimeError(platform, QStringLiteral("OAUTH_STATE_MISMATCH"), tr("OAuth state mismatch"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, tr("OAuth state mismatch"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth failed"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("OAuth state mismatch"));
         reconcileApiStatus();
         return;
     }
@@ -583,7 +614,7 @@ void MainWindow::onOAuthCallbackReceived(PlatformId platform, const QString& cod
         setPlatformRuntimeError(platform, errorCode, errorDescription);
         const QString detail = errorDescription.trimmed().isEmpty() ? errorCode : (errorCode + QStringLiteral(": ") + errorDescription);
         m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, detail);
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth canceled/failed"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth canceled/failed"));
         m_txtEventLog->append(QStringLiteral("[OAUTH-FAIL] %1 %2").arg(platformKey(platform), detail));
         appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, detail);
         reconcileApiStatus();
@@ -592,27 +623,27 @@ void MainWindow::onOAuthCallbackReceived(PlatformId platform, const QString& cod
 
     if (code.trimmed().isEmpty()) {
         m_authInProgress.insert(platform, false);
-        setPlatformRuntimeError(platform, QStringLiteral("OAUTH_CODE_MISSING"), QStringLiteral("OAuth code missing"));
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, QStringLiteral("OAuth code missing"));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth failed"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("OAuth code missing"));
+        setPlatformRuntimeError(platform, QStringLiteral("OAUTH_CODE_MISSING"), tr("OAuth code missing"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, tr("OAuth code missing"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth failed"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("OAuth code missing"));
         reconcileApiStatus();
         return;
     }
     if (platform == PlatformId::YouTube && codeVerifier.trimmed().isEmpty()) {
         m_authInProgress.insert(platform, false);
-        setPlatformRuntimeError(platform, QStringLiteral("PKCE_MISSING"), QStringLiteral("PKCE verifier missing"));
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, QStringLiteral("PKCE verifier missing"));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth failed"));
-        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, QStringLiteral("PKCE verifier missing"));
+        setPlatformRuntimeError(platform, QStringLiteral("PKCE_MISSING"), tr("PKCE verifier missing"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, tr("PKCE verifier missing"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth failed"));
+        appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, tr("PKCE verifier missing"));
         reconcileApiStatus();
         return;
     }
 
-    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, QStringLiteral("Exchanging token..."));
+    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, tr("Exchanging token..."));
     if (!startAuthCodeExchangeFlow(platform, settings, code, codeVerifier, state)) {
         m_authInProgress.insert(platform, false);
-        setPlatformRuntimeError(platform, QStringLiteral("AUTH_CODE_EXCHANGE_FAILED"), QStringLiteral("Failed to request token exchange"));
+        setPlatformRuntimeError(platform, QStringLiteral("AUTH_CODE_EXCHANGE_FAILED"), tr("Failed to request token exchange"));
         reconcileApiStatus();
         return;
     }
@@ -626,7 +657,7 @@ void MainWindow::onOAuthSessionFailed(PlatformId platform, const QString& reason
     m_pendingOAuthSettings.remove(platform);
     m_pendingPkceVerifier.remove(platform);
     m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, reason);
-    m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth failed"));
+    m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth failed"));
     m_txtEventLog->append(QStringLiteral("[OAUTH-FAIL] %1 %2").arg(platformKey(platform), reason));
     appendTokenAudit(platform, QStringLiteral("interactive_auth"), false, reason);
     reconcileApiStatus();
@@ -652,10 +683,10 @@ void MainWindow::onTokenGranted(PlatformId platform,
     }
 
     if (record.refreshToken.trimmed().isEmpty()) {
-        setPlatformRuntimeError(platform, QStringLiteral("TOKEN_REFRESH_MISSING"), QStringLiteral("Refresh token missing in response"));
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, QStringLiteral("Refresh token missing in response"));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Token update failed"));
-        appendTokenAudit(platform, flow, false, QStringLiteral("Refresh token missing in response"));
+        setPlatformRuntimeError(platform, QStringLiteral("TOKEN_REFRESH_MISSING"), tr("Refresh token missing in response"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::AUTH_REQUIRED, tr("Refresh token missing in response"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Token update failed"));
+        appendTokenAudit(platform, flow, false, tr("Refresh token missing in response"));
         return;
     }
 
@@ -669,17 +700,17 @@ void MainWindow::onTokenGranted(PlatformId platform,
     record.updatedAtUtc = nowUtc;
 
     if (!m_tokenVault.write(platform, record)) {
-        setPlatformRuntimeError(platform, QStringLiteral("TOKEN_VAULT_WRITE_FAILED"), QStringLiteral("Token vault write failed"));
-        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, QStringLiteral("Token vault write failed"));
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Token update failed"));
-        appendTokenAudit(platform, flow, false, QStringLiteral("Token vault write failed"));
+        setPlatformRuntimeError(platform, QStringLiteral("TOKEN_VAULT_WRITE_FAILED"), tr("Token vault write failed"));
+        m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, tr("Token vault write failed"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Token update failed"));
+        appendTokenAudit(platform, flow, false, tr("Token vault write failed"));
         return;
     }
 
     clearPlatformRuntimeError(platform);
     refreshTokenUi(platform);
     const bool isRefresh = flow == QStringLiteral("refresh_token");
-    const QString message = isRefresh ? QStringLiteral("Silent refresh success") : QStringLiteral("Interactive re-auth success");
+    const QString message = isRefresh ? tr("Silent refresh success") : tr("Interactive re-auth success");
     m_configurationDialog->onTokenActionFinished(platform, true, message);
     appendTokenAudit(platform, flow, true, message);
     m_txtEventLog->append(QStringLiteral("[TOKEN-OK] %1 flow=%2").arg(platformKey(platform), flow));
@@ -711,8 +742,8 @@ void MainWindow::onTokenFailed(PlatformId platform, const QString& flow, const Q
         authRequired ? TokenState::AUTH_REQUIRED : TokenState::ERROR,
         detailWithGuidance);
     m_configurationDialog->onTokenActionFinished(platform, false, flow == QStringLiteral("refresh_token")
-            ? QStringLiteral("Silent refresh failed")
-            : QStringLiteral("Interactive re-auth failed"));
+            ? tr("Silent refresh failed")
+            : tr("Interactive re-auth failed"));
     appendTokenAudit(platform, flow, false, detailWithGuidance);
     m_txtEventLog->append(QStringLiteral("[TOKEN-FAIL] %1 flow=%2 code=%3 http=%4 msg=%5")
                               .arg(platformKey(platform), flow, errorCode)
@@ -721,7 +752,7 @@ void MainWindow::onTokenFailed(PlatformId platform, const QString& flow, const Q
     setPlatformRuntimeError(platform, errorCode, detailWithGuidance);
     reconcileApiStatus();
     if (errorCode == QStringLiteral("invalid_grant")) {
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Live check skipped: token invalid"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Live check skipped: token invalid"));
     }
 }
 
@@ -733,17 +764,17 @@ void MainWindow::onTokenRevoked(PlatformId platform, const QString& flow)
     const bool localCleared = m_tokenVault.clear(platform);
     refreshTokenUi(platform);
     const QString detail = localCleared
-        ? QStringLiteral("Remote token revoke succeeded. Local token deleted.")
-        : QStringLiteral("Remote token revoke succeeded, but local token delete failed.");
+        ? tr("Remote token revoke succeeded. Local token deleted.")
+        : tr("Remote token revoke succeeded, but local token delete failed.");
     m_configurationDialog->onTokenActionFinished(platform, localCleared,
-        localCleared ? QStringLiteral("Token revoked and deleted")
-                     : QStringLiteral("Token revoked but local delete failed"));
+        localCleared ? tr("Token revoked and deleted")
+                     : tr("Token revoked but local delete failed"));
     appendTokenAudit(platform, QStringLiteral("token_revoke"), localCleared, detail);
     m_txtEventLog->append(QStringLiteral("[TOKEN-REVOKE-OK] %1").arg(platformKey(platform)));
     setPlatformRuntimePhase(platform, QStringLiteral("IDLE"));
     clearPlatformRuntimeError(platform);
     reconcileApiStatus();
-    setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Token revoked"));
+    setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Token revoked"));
 }
 
 void MainWindow::onTokenRevokeFailed(PlatformId platform, const QString& flow, const QString& errorCode, const QString& message, int httpStatus)
@@ -757,10 +788,10 @@ void MainWindow::onTokenRevokeFailed(PlatformId platform, const QString& flow, c
                                .arg(message)
                                .arg(httpStatus)
                                .arg(errorCode)
-                               .arg(localCleared ? QStringLiteral("deleted") : QStringLiteral("delete failed"));
+                               .arg(localCleared ? tr("deleted") : tr("delete failed"));
     m_configurationDialog->onTokenActionFinished(platform, localCleared,
-        localCleared ? QStringLiteral("Remote revoke failed, local token deleted")
-                     : QStringLiteral("Remote revoke failed, local delete failed"));
+        localCleared ? tr("Remote revoke failed, local token deleted")
+                     : tr("Remote revoke failed, local delete failed"));
     appendTokenAudit(platform, QStringLiteral("token_revoke"), false, detail);
     m_txtEventLog->append(QStringLiteral("[TOKEN-REVOKE-FAIL] %1 code=%2 http=%3 msg=%4")
                               .arg(platformKey(platform), errorCode)
@@ -769,7 +800,7 @@ void MainWindow::onTokenRevokeFailed(PlatformId platform, const QString& flow, c
     setPlatformRuntimeError(platform, errorCode, message);
     reconcileApiStatus();
     if (localCleared) {
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Token deleted locally"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Token deleted locally"));
     }
 }
 
@@ -791,7 +822,7 @@ void MainWindow::onConnectProgress(PlatformId platform, const QString& phase)
     } else if (normalized == QStringLiteral("CONNECTED")) {
         clearPlatformRuntimeError(platform);
     } else if (normalized == QStringLiteral("FAILED")) {
-        setPlatformRuntimeError(platform, QStringLiteral("CONNECT_FAILED"), QStringLiteral("Connect failed"));
+        setPlatformRuntimeError(platform, QStringLiteral("CONNECT_FAILED"), tr("Connect failed"));
     }
     m_txtEventLog->append(QStringLiteral("[CONNECT] %1: %2").arg(platformKey(platform), phase));
     reconcileApiStatus();
@@ -892,31 +923,31 @@ void MainWindow::setupUi()
     auto* rootLayout = new QVBoxLayout(root);
 
     auto* topLayout = new QHBoxLayout;
-    m_btnConnectToggle = new QPushButton(QStringLiteral("Connect"), root);
+    m_btnConnectToggle = new QPushButton(root);
     m_btnConnectToggle->setObjectName(QStringLiteral("btnConnectToggle"));
     m_btnToggleChatView = new QPushButton(root);
     m_btnToggleChatView->setObjectName(QStringLiteral("btnToggleChatView"));
-    refreshChatViewToggleButton();
-
-    m_lblConnectionState = new QLabel(QStringLiteral("IDLE"), root);
+    m_lblStateCaption = new QLabel(root);
+    m_lblStateCaption->setObjectName(QStringLiteral("lblStateCaption"));
+    m_lblConnectionState = new QLabel(root);
     m_lblConnectionState->setObjectName(QStringLiteral("lblConnectionState"));
 
-    m_btnOpenChatterList = new QPushButton(QStringLiteral("ChatterList"), root);
+    m_btnOpenChatterList = new QPushButton(root);
     m_btnOpenChatterList->setObjectName(QStringLiteral("btnOpenChatterList"));
-    m_btnOpenConfiguration = new QPushButton(QStringLiteral("Configuration"), root);
+    m_btnOpenConfiguration = new QPushButton(root);
     m_btnOpenConfiguration->setObjectName(QStringLiteral("btnOpenConfiguration"));
 
     topLayout->addWidget(m_btnConnectToggle);
     topLayout->addWidget(m_btnToggleChatView);
-    topLayout->addWidget(new QLabel(QStringLiteral("State:"), root));
+    topLayout->addWidget(m_lblStateCaption);
     topLayout->addWidget(m_lblConnectionState);
     topLayout->addStretch();
     topLayout->addWidget(m_btnOpenChatterList);
     topLayout->addWidget(m_btnOpenConfiguration);
 
     auto* statusLayout = new QHBoxLayout;
-    m_lblYouTubeStatus = new QLabel(QStringLiteral("YouTube: IDLE"), root);
-    m_lblChzzkStatus = new QLabel(QStringLiteral("CHZZK: IDLE"), root);
+    m_lblYouTubeStatus = new QLabel(root);
+    m_lblChzzkStatus = new QLabel(root);
     statusLayout->addWidget(m_lblYouTubeStatus);
     statusLayout->addWidget(m_lblChzzkStatus);
     statusLayout->addStretch();
@@ -931,24 +962,25 @@ void MainWindow::setupUi()
     connect(m_tblChat, &QTableWidget::itemSelectionChanged, this, &MainWindow::onChatSelectionChanged);
     auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_tblChat);
     connect(copyShortcut, &QShortcut::activated, this, &MainWindow::onCopySelectedChat);
-    auto* copyAction = new QAction(QStringLiteral("Copy Selected Chat"), m_tblChat);
+    auto* copyAction = new QAction(m_tblChat);
+    copyAction->setObjectName(QStringLiteral("actCopySelectedChat"));
     connect(copyAction, &QAction::triggered, this, &MainWindow::onCopySelectedChat);
     m_tblChat->setContextMenuPolicy(Qt::ActionsContextMenu);
     m_tblChat->addAction(copyAction);
 
-    auto* actionPanel = new QGroupBox(QStringLiteral("Actions"), root);
-    actionPanel->setObjectName(QStringLiteral("grpActionPanel"));
-    auto* actionPanelLayout = new QVBoxLayout(actionPanel);
+    m_grpActionPanel = new QGroupBox(root);
+    m_grpActionPanel->setObjectName(QStringLiteral("grpActionPanel"));
+    auto* actionPanelLayout = new QVBoxLayout(m_grpActionPanel);
 
     auto* platformIndicatorLayout = new QHBoxLayout;
-    m_boxYouTubeRuntime = new QFrame(actionPanel);
+    m_boxYouTubeRuntime = new QFrame(m_grpActionPanel);
     m_boxYouTubeRuntime->setObjectName(QStringLiteral("ytStatusBox"));
     m_boxYouTubeRuntime->setFixedSize(18, 18);
-    auto* lblYouTubeRuntime = new QLabel(QStringLiteral("YouTube"), actionPanel);
-    m_boxChzzkRuntime = new QFrame(actionPanel);
+    auto* lblYouTubeRuntime = new QLabel(QStringLiteral("YouTube"), m_grpActionPanel);
+    m_boxChzzkRuntime = new QFrame(m_grpActionPanel);
     m_boxChzzkRuntime->setObjectName(QStringLiteral("chzStatusBox"));
     m_boxChzzkRuntime->setFixedSize(18, 18);
-    auto* lblChzzkRuntime = new QLabel(QStringLiteral("CHZZK"), actionPanel);
+    auto* lblChzzkRuntime = new QLabel(QStringLiteral("CHZZK"), m_grpActionPanel);
     platformIndicatorLayout->addWidget(m_boxYouTubeRuntime);
     platformIndicatorLayout->addWidget(lblYouTubeRuntime);
     platformIndicatorLayout->addSpacing(12);
@@ -958,14 +990,14 @@ void MainWindow::setupUi()
     actionPanelLayout->addLayout(platformIndicatorLayout);
 
     auto* liveIndicatorLayout = new QHBoxLayout;
-    m_boxYouTubeLive = new QFrame(actionPanel);
+    m_boxYouTubeLive = new QFrame(m_grpActionPanel);
     m_boxYouTubeLive->setObjectName(QStringLiteral("ytLiveBox"));
     m_boxYouTubeLive->setFixedSize(18, 18);
-    m_lblYouTubeLive = new QLabel(QStringLiteral("YouTube Live: UNKNOWN"), actionPanel);
-    m_boxChzzkLive = new QFrame(actionPanel);
+    m_lblYouTubeLive = new QLabel(m_grpActionPanel);
+    m_boxChzzkLive = new QFrame(m_grpActionPanel);
     m_boxChzzkLive->setObjectName(QStringLiteral("chzLiveBox"));
     m_boxChzzkLive->setFixedSize(18, 18);
-    m_lblChzzkLive = new QLabel(QStringLiteral("CHZZK Live: UNKNOWN"), actionPanel);
+    m_lblChzzkLive = new QLabel(m_grpActionPanel);
     liveIndicatorLayout->addWidget(m_boxYouTubeLive);
     liveIndicatorLayout->addWidget(m_lblYouTubeLive);
     liveIndicatorLayout->addSpacing(12);
@@ -975,24 +1007,27 @@ void MainWindow::setupUi()
     actionPanelLayout->addLayout(liveIndicatorLayout);
 
     auto* selectedInfoLayout = new QFormLayout;
-    m_lblSelectedPlatform = new QLabel(QStringLiteral("-"), actionPanel);
-    m_lblSelectedAuthor = new QLabel(QStringLiteral("-"), actionPanel);
-    m_lblSelectedMessage = new QLabel(QStringLiteral("-"), actionPanel);
+    m_lblSelectedPlatformCaption = new QLabel(m_grpActionPanel);
+    m_lblSelectedAuthorCaption = new QLabel(m_grpActionPanel);
+    m_lblSelectedMessageCaption = new QLabel(m_grpActionPanel);
+    m_lblSelectedPlatform = new QLabel(QStringLiteral("-"), m_grpActionPanel);
+    m_lblSelectedAuthor = new QLabel(QStringLiteral("-"), m_grpActionPanel);
+    m_lblSelectedMessage = new QLabel(QStringLiteral("-"), m_grpActionPanel);
     m_lblSelectedMessage->setWordWrap(true);
-    selectedInfoLayout->addRow(QStringLiteral("Platform"), m_lblSelectedPlatform);
-    selectedInfoLayout->addRow(QStringLiteral("Author"), m_lblSelectedAuthor);
-    selectedInfoLayout->addRow(QStringLiteral("Message"), m_lblSelectedMessage);
+    selectedInfoLayout->addRow(m_lblSelectedPlatformCaption, m_lblSelectedPlatform);
+    selectedInfoLayout->addRow(m_lblSelectedAuthorCaption, m_lblSelectedAuthor);
+    selectedInfoLayout->addRow(m_lblSelectedMessageCaption, m_lblSelectedMessage);
     actionPanelLayout->addLayout(selectedInfoLayout);
 
-    m_btnActionSendMessage = new QPushButton(QStringLiteral("Send Message"), actionPanel);
+    m_btnActionSendMessage = new QPushButton(m_grpActionPanel);
     m_btnActionSendMessage->setObjectName(QStringLiteral("btnActionSendMessage"));
-    m_btnActionRestrictUser = new QPushButton(QStringLiteral("Restrict User"), actionPanel);
+    m_btnActionRestrictUser = new QPushButton(m_grpActionPanel);
     m_btnActionRestrictUser->setObjectName(QStringLiteral("btnActionRestrictUser"));
-    m_btnActionYoutubeDeleteMessage = new QPushButton(QStringLiteral("YouTube Delete Message"), actionPanel);
+    m_btnActionYoutubeDeleteMessage = new QPushButton(m_grpActionPanel);
     m_btnActionYoutubeDeleteMessage->setObjectName(QStringLiteral("btnActionYoutubeDeleteMessage"));
-    m_btnActionYoutubeTimeout = new QPushButton(QStringLiteral("YouTube Timeout 5m"), actionPanel);
+    m_btnActionYoutubeTimeout = new QPushButton(m_grpActionPanel);
     m_btnActionYoutubeTimeout->setObjectName(QStringLiteral("btnActionYoutubeTimeout"));
-    m_btnActionChzzkRestrict = new QPushButton(QStringLiteral("CHZZK Add Restriction"), actionPanel);
+    m_btnActionChzzkRestrict = new QPushButton(m_grpActionPanel);
     m_btnActionChzzkRestrict->setObjectName(QStringLiteral("btnActionChzzkRestrict"));
 
     actionPanelLayout->addWidget(m_btnActionSendMessage);
@@ -1002,52 +1037,54 @@ void MainWindow::setupUi()
     actionPanelLayout->addWidget(m_btnActionChzzkRestrict);
     actionPanelLayout->addStretch();
 
-    auto* legendWrap = new QWidget(actionPanel);
+    auto* legendWrap = new QWidget(m_grpActionPanel);
     legendWrap->setObjectName(QStringLiteral("statusLegend"));
     auto* legendGrid = new QGridLayout(legendWrap);
     legendGrid->setContentsMargins(0, 0, 0, 0);
     legendGrid->setHorizontalSpacing(10);
     legendGrid->setVerticalSpacing(4);
 
-    auto addLegendItem = [legendWrap, legendGrid](int row, int col, const QString& color, const QString& label) {
+    auto addLegendItem = [legendWrap, legendGrid](int row, int col, const QString& color, const QString& objectName, const QString& label) {
         auto* chip = new QFrame(legendWrap);
         chip->setFixedSize(12, 12);
         chip->setStyleSheet(QStringLiteral("background-color:%1; border:1px solid #666666; border-radius:2px;").arg(color));
         auto* text = new QLabel(label, legendWrap);
+        text->setObjectName(objectName);
         const int base = col * 2;
         legendGrid->addWidget(chip, row, base);
         legendGrid->addWidget(text, row, base + 1);
     };
 
-    addLegendItem(0, 0, QStringLiteral("#FFB74D"), QStringLiteral("인증중"));
-    addLegendItem(0, 1, QStringLiteral("#81D4FA"), QStringLiteral("온라인"));
-    addLegendItem(1, 0, QStringLiteral("#66BB6A"), QStringLiteral("토큰정상"));
-    addLegendItem(1, 1, QStringLiteral("#EF5350"), QStringLiteral("토큰비정상"));
+    addLegendItem(0, 0, QStringLiteral("#FFB74D"), QStringLiteral("lblLegendAuthInProgress"), tr("Auth In Progress"));
+    addLegendItem(0, 1, QStringLiteral("#81D4FA"), QStringLiteral("lblLegendOnline"), tr("Connected"));
+    addLegendItem(1, 0, QStringLiteral("#66BB6A"), QStringLiteral("lblLegendTokenOk"), tr("Token OK"));
+    addLegendItem(1, 1, QStringLiteral("#EF5350"), QStringLiteral("lblLegendTokenBad"), tr("Token Invalid"));
 
     actionPanelLayout->addWidget(legendWrap);
 
-    auto* liveLegendWrap = new QWidget(actionPanel);
+    auto* liveLegendWrap = new QWidget(m_grpActionPanel);
     liveLegendWrap->setObjectName(QStringLiteral("liveStatusLegend"));
     auto* liveLegendGrid = new QGridLayout(liveLegendWrap);
     liveLegendGrid->setContentsMargins(0, 0, 0, 0);
     liveLegendGrid->setHorizontalSpacing(10);
     liveLegendGrid->setVerticalSpacing(4);
 
-    auto addLiveLegendItem = [liveLegendWrap, liveLegendGrid](int row, int col, const QString& color, const QString& label) {
+    auto addLiveLegendItem = [liveLegendWrap, liveLegendGrid](int row, int col, const QString& color, const QString& objectName, const QString& label) {
         auto* chip = new QFrame(liveLegendWrap);
         chip->setFixedSize(12, 12);
         chip->setStyleSheet(QStringLiteral("background-color:%1; border:1px solid #666666; border-radius:2px;").arg(color));
         auto* text = new QLabel(label, liveLegendWrap);
+        text->setObjectName(objectName);
         const int base = col * 2;
         liveLegendGrid->addWidget(chip, row, base);
         liveLegendGrid->addWidget(text, row, base + 1);
     };
 
-    addLiveLegendItem(0, 0, QStringLiteral("#90A4AE"), QStringLiteral("라이브미확인"));
-    addLiveLegendItem(0, 1, QStringLiteral("#5C6BC0"), QStringLiteral("라이브확인중"));
-    addLiveLegendItem(1, 0, QStringLiteral("#26A69A"), QStringLiteral("라이브온라인"));
-    addLiveLegendItem(1, 1, QStringLiteral("#BCAAA4"), QStringLiteral("라이브오프라인"));
-    addLiveLegendItem(2, 0, QStringLiteral("#8E24AA"), QStringLiteral("라이브오류"));
+    addLiveLegendItem(0, 0, QStringLiteral("#90A4AE"), QStringLiteral("lblLegendLiveUnknown"), tr("Live Unknown"));
+    addLiveLegendItem(0, 1, QStringLiteral("#5C6BC0"), QStringLiteral("lblLegendLiveChecking"), tr("Live Checking"));
+    addLiveLegendItem(1, 0, QStringLiteral("#26A69A"), QStringLiteral("lblLegendLiveOnline"), tr("Live Online"));
+    addLiveLegendItem(1, 1, QStringLiteral("#BCAAA4"), QStringLiteral("lblLegendLiveOffline"), tr("Live Offline"));
+    addLiveLegendItem(2, 0, QStringLiteral("#8E24AA"), QStringLiteral("lblLegendLiveError"), tr("Live Error"));
 
     actionPanelLayout->addWidget(liveLegendWrap);
 
@@ -1059,7 +1096,7 @@ void MainWindow::setupUi()
 
     auto* centerLayout = new QHBoxLayout;
     centerLayout->addWidget(m_tblChat, 3);
-    centerLayout->addWidget(actionPanel, 2);
+    centerLayout->addWidget(m_grpActionPanel, 2);
 
     auto* composerWrap = new QWidget(root);
     composerWrap->setObjectName(QStringLiteral("composerWrap"));
@@ -1068,7 +1105,6 @@ void MainWindow::setupUi()
     composerLayout->setSpacing(8);
     m_edtComposer = new QPlainTextEdit(composerWrap);
     m_edtComposer->setObjectName(QStringLiteral("edtComposer"));
-    m_edtComposer->setPlaceholderText(QStringLiteral("Type message here... (Enter=Send, Shift+Space=New line, Ctrl+Up/Down=History)"));
     m_edtComposer->setFixedHeight(68);
     m_edtComposer->installEventFilter(this);
     connect(m_edtComposer, &QPlainTextEdit::textChanged, this, [this]() {
@@ -1080,7 +1116,7 @@ void MainWindow::setupUi()
         }
         updateComposerUiState();
     });
-    m_btnComposerSend = new QPushButton(QStringLiteral("Send"), composerWrap);
+    m_btnComposerSend = new QPushButton(composerWrap);
     m_btnComposerSend->setObjectName(QStringLiteral("btnComposerSend"));
     connect(m_btnComposerSend, &QPushButton::clicked, this, &MainWindow::onActionSendMessage);
     composerLayout->addWidget(m_edtComposer, 1);
@@ -1098,14 +1134,143 @@ void MainWindow::setupUi()
     rootLayout->addWidget(m_txtEventLog);
 
     setCentralWidget(root);
-    setWindowTitle(QStringLiteral("BotManager Qt5"));
     resize(1000, 700);
 
     connect(m_btnConnectToggle, &QPushButton::clicked, this, &MainWindow::onConnectToggleClicked);
     connect(m_btnToggleChatView, &QPushButton::clicked, this, &MainWindow::onToggleChatViewClicked);
     connect(m_btnOpenChatterList, &QPushButton::clicked, this, &MainWindow::onOpenChatterList);
     connect(m_btnOpenConfiguration, &QPushButton::clicked, this, &MainWindow::onOpenConfiguration);
+    retranslateUi();
     updateComposerUiState();
+}
+
+void MainWindow::retranslateUi()
+{
+    setWindowTitle(tr("BotManager Qt5"));
+    if (m_lblStateCaption) {
+        m_lblStateCaption->setText(tr("State:"));
+    }
+    if (m_btnOpenChatterList) {
+        m_btnOpenChatterList->setText(tr("ChatterList"));
+    }
+    if (m_btnOpenConfiguration) {
+        m_btnOpenConfiguration->setText(tr("Configuration"));
+    }
+    if (m_grpActionPanel) {
+        m_grpActionPanel->setTitle(tr("Actions"));
+    }
+    if (m_lblSelectedPlatformCaption) {
+        m_lblSelectedPlatformCaption->setText(tr("Platform"));
+    }
+    if (m_lblSelectedAuthorCaption) {
+        m_lblSelectedAuthorCaption->setText(tr("Author"));
+    }
+    if (m_lblSelectedMessageCaption) {
+        m_lblSelectedMessageCaption->setText(tr("Message"));
+    }
+    if (m_btnActionSendMessage) {
+        m_btnActionSendMessage->setText(tr("Send Message"));
+    }
+    if (m_btnActionRestrictUser) {
+        m_btnActionRestrictUser->setText(tr("Restrict User"));
+    }
+    if (m_btnActionYoutubeDeleteMessage) {
+        m_btnActionYoutubeDeleteMessage->setText(tr("YouTube Delete Message"));
+    }
+    if (m_btnActionYoutubeTimeout) {
+        m_btnActionYoutubeTimeout->setText(tr("YouTube Timeout 5m"));
+    }
+    if (m_btnActionChzzkRestrict) {
+        m_btnActionChzzkRestrict->setText(tr("CHZZK Add Restriction"));
+    }
+    if (m_edtComposer) {
+        m_edtComposer->setPlaceholderText(tr("Type message here... (Enter=Send, Shift+Space=New line, Ctrl+Up/Down=History)"));
+    }
+    if (m_btnComposerSend) {
+        m_btnComposerSend->setText(tr("Send"));
+    }
+    if (QAction* copyAction = m_tblChat ? m_tblChat->findChild<QAction*>(QStringLiteral("actCopySelectedChat")) : nullptr) {
+        copyAction->setText(tr("Copy Selected Chat"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendAuthInProgress"))) {
+        label->setText(tr("Auth In Progress"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendOnline"))) {
+        label->setText(tr("Connected"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendTokenOk"))) {
+        label->setText(tr("Token OK"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendTokenBad"))) {
+        label->setText(tr("Token Invalid"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendLiveUnknown"))) {
+        label->setText(tr("Live Unknown"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendLiveChecking"))) {
+        label->setText(tr("Live Checking"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendLiveOnline"))) {
+        label->setText(tr("Live Online"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendLiveOffline"))) {
+        label->setText(tr("Live Offline"));
+    }
+    if (QLabel* label = findChild<QLabel*>(QStringLiteral("lblLegendLiveError"))) {
+        label->setText(tr("Live Error"));
+    }
+    refreshConnectButton();
+    refreshChatViewToggleButton();
+    configureChatTableForCurrentView();
+    m_lblConnectionState->setText(connectionStateText(m_connectionCoordinator.state()));
+    setPlatformStatus(PlatformId::YouTube, m_platformStatusCodes.value(PlatformId::YouTube, QStringLiteral("IDLE")));
+    setPlatformStatus(PlatformId::Chzzk, m_platformStatusCodes.value(PlatformId::Chzzk, QStringLiteral("IDLE")));
+    refreshLiveBroadcastIndicators();
+    refreshPlatformIndicators();
+    updateActionPanel();
+}
+
+void MainWindow::recreateAuxiliaryDialogs(bool reopenConfiguration, bool reopenChatterList)
+{
+    if (m_configurationDialog) {
+        disconnect(m_configurationDialog, nullptr, this, nullptr);
+        m_configurationDialog->hide();
+        m_configurationDialog->deleteLater();
+        m_configurationDialog = nullptr;
+    }
+    m_configurationDialog = new ConfigurationDialog(this);
+    m_configurationDialog->setSnapshot(m_snapshot);
+    connect(m_configurationDialog, &ConfigurationDialog::configApplyRequested,
+        this, &MainWindow::onConfigApplyRequested);
+    connect(m_configurationDialog, &ConfigurationDialog::tokenRefreshRequested,
+        this, &MainWindow::onTokenRefreshRequested);
+    connect(m_configurationDialog, &ConfigurationDialog::interactiveAuthRequested,
+        this, &MainWindow::onInteractiveAuthRequested);
+    connect(m_configurationDialog, &ConfigurationDialog::tokenDeleteRequested,
+        this, &MainWindow::onTokenDeleteRequested);
+    connect(m_configurationDialog, &ConfigurationDialog::platformConfigValidationRequested,
+        this, &MainWindow::onPlatformConfigValidationRequested);
+    refreshAllTokenUi();
+    if (reopenConfiguration) {
+        m_configurationDialog->show();
+        m_configurationDialog->raise();
+        m_configurationDialog->activateWindow();
+    }
+
+    if (m_chatterListDialog) {
+        disconnect(m_chatterListDialog, nullptr, this, nullptr);
+        m_chatterListDialog->hide();
+        m_chatterListDialog->deleteLater();
+        m_chatterListDialog = nullptr;
+    }
+    m_chatterListDialog = new ChatterListDialog(this);
+    connect(m_chatterListDialog, &ChatterListDialog::resetRequested, this, &MainWindow::onResetChatterList);
+    refreshChatterListDialog();
+    if (reopenChatterList) {
+        m_chatterListDialog->show();
+        m_chatterListDialog->raise();
+        m_chatterListDialog->activateWindow();
+    }
 }
 
 void MainWindow::refreshConnectButton()
@@ -1115,20 +1280,20 @@ void MainWindow::refreshConnectButton()
     switch (state) {
     case ConnectionState::IDLE:
     case ConnectionState::ERROR:
-        m_btnConnectToggle->setText(QStringLiteral("Connect"));
+        m_btnConnectToggle->setText(tr("Connect"));
         m_btnConnectToggle->setEnabled(true);
         break;
     case ConnectionState::CONNECTING:
-        m_btnConnectToggle->setText(QStringLiteral("Connecting..."));
+        m_btnConnectToggle->setText(tr("Connecting..."));
         m_btnConnectToggle->setEnabled(false);
         break;
     case ConnectionState::CONNECTED:
     case ConnectionState::PARTIALLY_CONNECTED:
-        m_btnConnectToggle->setText(QStringLiteral("Disconnect"));
+        m_btnConnectToggle->setText(tr("Disconnect"));
         m_btnConnectToggle->setEnabled(true);
         break;
     case ConnectionState::DISCONNECTING:
-        m_btnConnectToggle->setText(QStringLiteral("Disconnecting..."));
+        m_btnConnectToggle->setText(tr("Disconnecting..."));
         m_btnConnectToggle->setEnabled(false);
         break;
     }
@@ -1141,8 +1306,8 @@ void MainWindow::refreshChatViewToggleButton()
     }
     m_btnToggleChatView->setText(
         m_chatViewMode == ChatViewMode::Messenger
-            ? QStringLiteral("View: Messenger")
-            : QStringLiteral("View: Table"));
+            ? tr("View: Messenger")
+            : tr("View: Table"));
 }
 
 void MainWindow::configureChatTableForCurrentView()
@@ -1153,7 +1318,7 @@ void MainWindow::configureChatTableForCurrentView()
 
     if (m_chatViewMode == ChatViewMode::Messenger) {
         m_tblChat->setColumnCount(1);
-        m_tblChat->setHorizontalHeaderLabels({ QStringLiteral("Chat") });
+        m_tblChat->setHorizontalHeaderLabels({ tr("Chat") });
         m_tblChat->horizontalHeader()->setVisible(false);
         m_tblChat->horizontalHeader()->setStretchLastSection(true);
         m_tblChat->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -1172,7 +1337,7 @@ void MainWindow::configureChatTableForCurrentView()
     }
 
     m_tblChat->setColumnCount(4);
-    m_tblChat->setHorizontalHeaderLabels({ QStringLiteral("Time"), QStringLiteral("Platform"), QStringLiteral("Author"), QStringLiteral("Message") });
+    m_tblChat->setHorizontalHeaderLabels({ tr("Time"), tr("Platform"), tr("Author"), tr("Message") });
     m_tblChat->horizontalHeader()->setVisible(true);
     m_tblChat->horizontalHeader()->setStretchLastSection(true);
     m_tblChat->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -1186,11 +1351,13 @@ void MainWindow::configureChatTableForCurrentView()
 
 void MainWindow::setPlatformStatus(PlatformId platform, const QString& statusText)
 {
+    m_platformStatusCodes.insert(platform, statusText);
+    const QString display = displayPlatformPhase(statusText);
     if (platform == PlatformId::YouTube) {
-        m_lblYouTubeStatus->setText(QStringLiteral("YouTube: %1").arg(statusText));
+        m_lblYouTubeStatus->setText(tr("YouTube: %1").arg(display));
         return;
     }
-    m_lblChzzkStatus->setText(QStringLiteral("CHZZK: %1").arg(statusText));
+    m_lblChzzkStatus->setText(tr("CHZZK: %1").arg(display));
 }
 
 void MainWindow::setPlatformRuntimePhase(PlatformId platform, const QString& phase)
@@ -1292,19 +1459,46 @@ QString MainWindow::connectionStateText(ConnectionState state) const
 {
     switch (state) {
     case ConnectionState::IDLE:
-        return QStringLiteral("IDLE");
+        return tr("IDLE");
     case ConnectionState::CONNECTING:
-        return QStringLiteral("CONNECTING");
+        return tr("CONNECTING");
     case ConnectionState::PARTIALLY_CONNECTED:
-        return QStringLiteral("PARTIALLY_CONNECTED");
+        return tr("PARTIALLY_CONNECTED");
     case ConnectionState::CONNECTED:
-        return QStringLiteral("CONNECTED");
+        return tr("CONNECTED");
     case ConnectionState::DISCONNECTING:
-        return QStringLiteral("DISCONNECTING");
+        return tr("DISCONNECTING");
     case ConnectionState::ERROR:
-        return QStringLiteral("ERROR");
+        return tr("ERROR");
     }
-    return QStringLiteral("UNKNOWN");
+    return tr("UNKNOWN");
+}
+
+QString MainWindow::displayPlatformPhase(const QString& phase) const
+{
+    const QString normalized = phase.trimmed().toUpper();
+    if (normalized == QStringLiteral("IDLE")) {
+        return tr("IDLE");
+    }
+    if (normalized == QStringLiteral("STARTING")) {
+        return tr("STARTING");
+    }
+    if (normalized == QStringLiteral("CONNECTED")) {
+        return tr("CONNECTED");
+    }
+    if (normalized == QStringLiteral("FAILED")) {
+        return tr("FAILED");
+    }
+    if (normalized == QStringLiteral("CONNECTED_NO_LIVECHAT")) {
+        return tr("CONNECTED_NO_LIVECHAT");
+    }
+    if (normalized == QStringLiteral("CONNECTED_NO_SESSIONKEY")) {
+        return tr("CONNECTED_NO_SESSIONKEY");
+    }
+    if (normalized == QStringLiteral("CONNECTED_NO_SUBSCRIBE")) {
+        return tr("CONNECTED_NO_SUBSCRIBE");
+    }
+    return phase;
 }
 
 void MainWindow::onChatReceived(const UnifiedChatMessage& message)
@@ -1384,7 +1578,7 @@ void MainWindow::refreshChatterListDialog()
 
 void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message)
 {
-    const QString platform = platformKey(message.platform);
+    const QString platform = message.platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK");
     const QString timeText = message.timestamp.isValid()
         ? message.timestamp.toString(QStringLiteral("HH:mm:ss"))
         : QStringLiteral("-");
@@ -1518,7 +1712,7 @@ void MainWindow::onCopySelectedChat()
 
     const int row = selectedChatRow();
     if (row < 0) {
-        statusBar()->showMessage(QStringLiteral("No chat selected."), 1500);
+        statusBar()->showMessage(tr("No chat selected."), 1500);
         return;
     }
 
@@ -1533,7 +1727,7 @@ void MainWindow::onCopySelectedChat()
         cells.push_back(value);
     }
     QGuiApplication::clipboard()->setText(cells.join(QStringLiteral("\t")));
-    statusBar()->showMessage(QStringLiteral("Selected chat copied."), 1500);
+    statusBar()->showMessage(tr("Selected chat copied."), 1500);
 }
 
 void MainWindow::onActionSendMessage()
@@ -1606,7 +1800,7 @@ void MainWindow::updateActionPanel()
         m_lblSelectedAuthor->setText(QStringLiteral("-"));
         m_lblSelectedMessage->setText(QStringLiteral("-"));
 
-        const QString reason = QStringLiteral("Select a chat message.");
+        const QString reason = tr("Select a chat message.");
         setActionButtonState(m_btnActionRestrictUser, false, reason);
         setActionButtonState(m_btnActionYoutubeDeleteMessage, false, reason);
         setActionButtonState(m_btnActionYoutubeTimeout, false, reason);
@@ -1615,7 +1809,7 @@ void MainWindow::updateActionPanel()
         return;
     }
 
-    m_lblSelectedPlatform->setText(platformKey(msg->platform));
+    m_lblSelectedPlatform->setText(msg->platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK"));
     const QString authorDisplay = messengerAuthorLabel(*msg);
     if (!msg->authorId.trimmed().isEmpty() && authorDisplay != msg->authorId.trimmed()) {
         m_lblSelectedAuthor->setText(QStringLiteral("%1 (%2)").arg(authorDisplay, msg->authorId));
@@ -1625,18 +1819,18 @@ void MainWindow::updateActionPanel()
     m_lblSelectedMessage->setText(msg->text);
 
     const bool platformReady = connections.value(msg->platform, false) && isPlatformLiveOnline(msg->platform);
-    setActionButtonState(m_btnActionRestrictUser, !msg->authorId.isEmpty() && platformReady, QStringLiteral("Missing author id or platform not ready."));
+    setActionButtonState(m_btnActionRestrictUser, !msg->authorId.isEmpty() && platformReady, tr("Missing author id or platform not ready."));
 
     if (msg->platform == PlatformId::YouTube) {
         const bool youtubeReady = connections.value(PlatformId::YouTube, false) && isPlatformLiveOnline(PlatformId::YouTube);
-        setActionButtonState(m_btnActionYoutubeDeleteMessage, !msg->messageId.isEmpty() && youtubeReady, QStringLiteral("Missing message id or YouTube not ready."));
-        setActionButtonState(m_btnActionYoutubeTimeout, !msg->authorId.isEmpty() && youtubeReady, QStringLiteral("Missing author id or YouTube not ready."));
-        setActionButtonState(m_btnActionChzzkRestrict, false, QStringLiteral("Not a CHZZK message."));
+        setActionButtonState(m_btnActionYoutubeDeleteMessage, !msg->messageId.isEmpty() && youtubeReady, tr("Missing message id or YouTube not ready."));
+        setActionButtonState(m_btnActionYoutubeTimeout, !msg->authorId.isEmpty() && youtubeReady, tr("Missing author id or YouTube not ready."));
+        setActionButtonState(m_btnActionChzzkRestrict, false, tr("Not a CHZZK message."));
     } else {
-        setActionButtonState(m_btnActionYoutubeDeleteMessage, false, QStringLiteral("Not a YouTube message."));
-        setActionButtonState(m_btnActionYoutubeTimeout, false, QStringLiteral("Not a YouTube message."));
+        setActionButtonState(m_btnActionYoutubeDeleteMessage, false, tr("Not a YouTube message."));
+        setActionButtonState(m_btnActionYoutubeTimeout, false, tr("Not a YouTube message."));
         const bool chzzkReady = connections.value(PlatformId::Chzzk, false) && isPlatformLiveOnline(PlatformId::Chzzk);
-        setActionButtonState(m_btnActionChzzkRestrict, !msg->authorId.isEmpty() && chzzkReady, QStringLiteral("Missing author id or CHZZK not ready."));
+        setActionButtonState(m_btnActionChzzkRestrict, !msg->authorId.isEmpty() && chzzkReady, tr("Missing author id or CHZZK not ready."));
     }
     updateComposerUiState();
 }
@@ -1675,7 +1869,7 @@ void MainWindow::executeAction(const QString& actionId)
 {
     const UnifiedChatMessage* msg = selectedChatMessage();
     if (!msg) {
-        statusBar()->showMessage(QStringLiteral("No chat selected."), 2500);
+        statusBar()->showMessage(tr("No chat selected."), 2500);
         return;
     }
 
@@ -1683,13 +1877,13 @@ void MainWindow::executeAction(const QString& actionId)
     if (result.ok) {
         m_txtEventLog->append(QStringLiteral("[ACTION-OK] %1 platform=%2 author=%3 messageId=%4 msg=%5")
                                   .arg(actionId, platformKey(msg->platform), msg->authorId, msg->messageId, result.message));
-        statusBar()->showMessage(QStringLiteral("Action executed: %1").arg(actionId), 2500);
+        statusBar()->showMessage(tr("Action executed: %1").arg(actionId), 2500);
         return;
     }
 
     m_txtEventLog->append(QStringLiteral("[ACTION-FAIL] %1 code=%2 message=%3")
                               .arg(actionId, result.errorCode, result.message));
-    statusBar()->showMessage(QStringLiteral("Action failed: %1 (%2)").arg(actionId, result.errorCode), 3000);
+    statusBar()->showMessage(tr("Action failed: %1 (%2)").arg(actionId, result.errorCode), 3000);
 }
 
 void MainWindow::updateComposerUiState()
@@ -1703,9 +1897,9 @@ void MainWindow::updateComposerUiState()
 
     QString reason;
     if (!hasText) {
-        reason = QStringLiteral("Input message first.");
+        reason = tr("Input message first.");
     } else if (!anyPlatformReady) {
-        reason = QStringLiteral("Both platforms are disconnected or live is offline.");
+        reason = tr("Both platforms are disconnected or live is offline.");
     }
 
     setActionButtonState(m_btnActionSendMessage, enabled, reason);
@@ -1719,7 +1913,7 @@ void MainWindow::sendComposedMessage()
     }
     const QString text = m_edtComposer->toPlainText();
     if (text.trimmed().isEmpty()) {
-        statusBar()->showMessage(QStringLiteral("Input message first."), 2000);
+        statusBar()->showMessage(tr("Input message first."), 2000);
         return;
     }
 
@@ -1732,7 +1926,7 @@ void MainWindow::sendComposedMessage()
     }
 
     if (started <= 0) {
-        statusBar()->showMessage(QStringLiteral("No platform is ready to send."), 2500);
+        statusBar()->showMessage(tr("No platform is ready to send."), 2500);
         return;
     }
 
@@ -1909,13 +2103,13 @@ void MainWindow::refreshTokenUi(PlatformId platform)
     TokenRecord record;
     if (!m_tokenVault.read(platform, &record)) {
         TokenRecord empty;
-        m_configurationDialog->onTokenRecordUpdated(platform, TokenState::NO_TOKEN, empty, QStringLiteral("No token"));
+        m_configurationDialog->onTokenRecordUpdated(platform, TokenState::NO_TOKEN, empty, tr("No token"));
         refreshPlatformIndicator(platform);
         return;
     }
 
     const TokenState state = inferTokenState(&record);
-    m_configurationDialog->onTokenRecordUpdated(platform, state, record, QStringLiteral("Loaded from vault"));
+    m_configurationDialog->onTokenRecordUpdated(platform, state, record, tr("Loaded from vault"));
     refreshPlatformIndicator(platform);
 }
 
@@ -1982,26 +2176,26 @@ void MainWindow::applyPlatformIndicatorStyle(QFrame* indicator, PlatformId platf
     const PlatformRuntimeState runtime = m_platformRuntimeStates.value(platform);
 
     QString color = QStringLiteral("#EF5350");
-    QString stateText = QStringLiteral("TOKEN_BAD");
+    QString stateText = tr("TOKEN_BAD");
     switch (state) {
     case PlatformVisualState::AUTH_IN_PROGRESS:
         color = QStringLiteral("#FFB74D");
-        stateText = QStringLiteral("AUTH_IN_PROGRESS");
+        stateText = tr("AUTH_IN_PROGRESS");
         break;
     case PlatformVisualState::ONLINE:
         color = QStringLiteral("#81D4FA");
-        stateText = QStringLiteral("ONLINE");
+        stateText = tr("ONLINE");
         break;
     case PlatformVisualState::TOKEN_OK:
         color = QStringLiteral("#66BB6A");
-        stateText = QStringLiteral("TOKEN_OK");
+        stateText = tr("TOKEN_OK");
         break;
     case PlatformVisualState::TOKEN_BAD:
         break;
     }
 
     indicator->setStyleSheet(QStringLiteral("background-color:%1; border:1px solid #666666; border-radius:2px;").arg(color));
-    QString tooltip = QStringLiteral("%1: %2").arg(platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK"), stateText);
+    QString tooltip = tr("%1: %2").arg(platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK"), stateText);
     if (!runtime.phase.trimmed().isEmpty()) {
         tooltip += QStringLiteral("\nphase=%1").arg(runtime.phase);
     }
@@ -2041,24 +2235,24 @@ void MainWindow::probeLiveStatus(PlatformId platform)
 {
     const PlatformSettings settings = settingsFor(platform);
     if (!settings.enabled) {
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Disabled"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Disabled"));
         return;
     }
 
     TokenRecord record;
     if (!m_tokenVault.read(platform, &record) || record.accessToken.trimmed().isEmpty()) {
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("No access token"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("No access token"));
         return;
     }
 
     const TokenState tokenState = inferTokenState(&record);
     if (tokenState == TokenState::EXPIRED || tokenState == TokenState::NO_TOKEN || tokenState == TokenState::AUTH_REQUIRED) {
-        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, QStringLiteral("Live check skipped: token unavailable"));
+        setLiveBroadcastState(platform, LiveBroadcastState::UNKNOWN, tr("Live check skipped: token unavailable"));
         return;
     }
 
     if (m_liveStates.value(platform, LiveBroadcastState::UNKNOWN) == LiveBroadcastState::UNKNOWN) {
-        setLiveBroadcastState(platform, LiveBroadcastState::CHECKING, QStringLiteral("Checking live status"));
+        setLiveBroadcastState(platform, LiveBroadcastState::CHECKING, tr("Checking live status"));
     }
 
     if (platform == PlatformId::YouTube) {
@@ -2079,7 +2273,7 @@ void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
 {
     const QString token = accessToken.trimmed();
     if (token.isEmpty()) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, QStringLiteral("No access token"));
+        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, tr("No access token"));
         return;
     }
 
@@ -2095,7 +2289,7 @@ void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
 
     QNetworkReply* reply = m_networkAccessManager.get(req);
     if (!reply) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, QStringLiteral("Failed to create liveBroadcasts request"));
+        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, tr("Failed to create liveBroadcasts request"));
         return;
     }
     m_pendingYouTubeLiveProbe = true;
@@ -2135,7 +2329,7 @@ void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
                 probeYouTubeLiveStatusBySearch(token);
             } else if (!token.isEmpty()) {
                 syncYouTubeProfileFromAccessToken(token);
-                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::CHECKING, QStringLiteral("channel_id missing (syncing profile)"));
+                setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::CHECKING, tr("channel_id missing (syncing profile)"));
             } else {
                 setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, detail);
             }
@@ -2160,12 +2354,12 @@ void MainWindow::probeYouTubeLiveStatus(const QString& accessToken)
         }
 
         if (!isLive) {
-            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, QStringLiteral("No active broadcast"));
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, tr("No active broadcast"));
             reply->deleteLater();
             return;
         }
         setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE,
-            liveTitle.isEmpty() ? QStringLiteral("Active broadcast detected") : liveTitle);
+            liveTitle.isEmpty() ? tr("Active broadcast detected") : liveTitle);
         reply->deleteLater();
     });
 }
@@ -2175,7 +2369,7 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
     const QString token = accessToken.trimmed();
     const QString channelId = m_snapshot.youtube.channelId.trimmed();
     if (token.isEmpty() || channelId.isEmpty()) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, QStringLiteral("channel_id missing"));
+        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, tr("channel_id missing"));
         return;
     }
 
@@ -2192,7 +2386,7 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
     req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(token).toUtf8());
     QNetworkReply* reply = m_networkAccessManager.get(req);
     if (!reply) {
-        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, QStringLiteral("Failed to create search request"));
+        setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ERROR, tr("Failed to create search request"));
         return;
     }
     m_pendingYouTubeLiveProbe = true;
@@ -2233,7 +2427,7 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
 
         const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
         if (items.isEmpty()) {
-            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, QStringLiteral("No live search result"));
+            setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::OFFLINE, tr("No live search result"));
             reply->deleteLater();
             return;
         }
@@ -2242,7 +2436,7 @@ void MainWindow::probeYouTubeLiveStatusBySearch(const QString& accessToken)
         const QJsonObject snippet = first.value(QStringLiteral("snippet")).toObject();
         const QString title = snippet.value(QStringLiteral("title")).toString().trimmed();
         setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::ONLINE,
-            title.isEmpty() ? QStringLiteral("Live search result found") : title);
+            title.isEmpty() ? tr("Live search result found") : title);
         reply->deleteLater();
     });
 }
@@ -2255,7 +2449,7 @@ void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
         if (!token.isEmpty()) {
             syncChzzkProfileFromAccessToken(token);
         }
-        setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::UNKNOWN, QStringLiteral("channel_id missing (syncing profile)"));
+        setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::UNKNOWN, tr("channel_id missing (syncing profile)"));
         return;
     }
 
@@ -2265,7 +2459,7 @@ void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
 
     QNetworkReply* reply = m_networkAccessManager.get(req);
     if (!reply) {
-        setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::ERROR, QStringLiteral("Failed to create live-detail request"));
+        setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::ERROR, tr("Failed to create live-detail request"));
         return;
     }
     m_pendingChzzkLiveProbe = true;
@@ -2315,10 +2509,10 @@ void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
 
         if (isLive) {
             setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::ONLINE,
-                liveTitle.isEmpty() ? QStringLiteral("Active broadcast detected") : liveTitle);
+                liveTitle.isEmpty() ? tr("Active broadcast detected") : liveTitle);
         } else {
             setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::OFFLINE,
-                status.isEmpty() ? QStringLiteral("No active broadcast") : status);
+                status.isEmpty() ? tr("No active broadcast") : status);
         }
         reply->deleteLater();
     });
@@ -2343,17 +2537,17 @@ QString MainWindow::liveBroadcastStateText(LiveBroadcastState state) const
 {
     switch (state) {
     case LiveBroadcastState::UNKNOWN:
-        return QStringLiteral("UNKNOWN");
+        return tr("UNKNOWN");
     case LiveBroadcastState::CHECKING:
-        return QStringLiteral("CHECKING");
+        return tr("CHECKING");
     case LiveBroadcastState::ONLINE:
-        return QStringLiteral("ONLINE");
+        return tr("ONLINE");
     case LiveBroadcastState::OFFLINE:
-        return QStringLiteral("OFFLINE");
+        return tr("OFFLINE");
     case LiveBroadcastState::ERROR:
-        return QStringLiteral("ERROR");
+        return tr("ERROR");
     }
-    return QStringLiteral("UNKNOWN");
+    return tr("UNKNOWN");
 }
 
 void MainWindow::refreshLiveBroadcastIndicators()
@@ -2402,10 +2596,10 @@ void MainWindow::applyLiveBroadcastIndicatorStyle(QFrame* indicator, QLabel* lab
 
     const QString stateText = liveBroadcastStateText(state);
     const QString platformText = platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK");
-    label->setText(QStringLiteral("%1 Live: %2").arg(platformText, stateText));
+    label->setText(tr("%1 Live: %2").arg(platformText, stateText));
     const QString tooltip = detail.isEmpty()
-        ? QStringLiteral("%1 live state: %2").arg(platformText, stateText)
-        : QStringLiteral("%1 live state: %2\n%3").arg(platformText, stateText, detail);
+        ? tr("%1 live state: %2").arg(platformText, stateText)
+        : tr("%1 live state: %2\n%3").arg(platformText, stateText, detail);
     label->setToolTip(tooltip);
     indicator->setToolTip(tooltip);
 }
@@ -2523,7 +2717,7 @@ void MainWindow::syncYouTubeProfileFromAccessToken(const QString& accessToken)
                                        updated.youtube.accountLabel.isEmpty() ? QStringLiteral("-") : updated.youtube.accountLabel,
                                        updated.youtube.channelName.isEmpty() ? QStringLiteral("-") : updated.youtube.channelName);
         m_txtEventLog->append(QStringLiteral("[YOUTUBE-PROFILE] channels.mine synchronized %1").arg(synced));
-        statusBar()->showMessage(QStringLiteral("YouTube profile synchronized from channels.mine"), 3000);
+        statusBar()->showMessage(tr("YouTube profile synchronized from channels.mine"), 3000);
         reply->deleteLater();
     });
 }
@@ -2634,7 +2828,7 @@ void MainWindow::syncChzzkProfileFromAccessToken(const QString& accessToken)
                                    .arg(updated.chzzk.channelId,
                                        updated.chzzk.channelName.isEmpty() ? QStringLiteral("-") : updated.chzzk.channelName);
         m_txtEventLog->append(QStringLiteral("[CHZZK-PROFILE] users/me synchronized %1").arg(synced));
-        statusBar()->showMessage(QStringLiteral("CHZZK profile synchronized from users/me"), 3000);
+        statusBar()->showMessage(tr("CHZZK profile synchronized from users/me"), 3000);
         reply->deleteLater();
     });
 }
@@ -2666,27 +2860,27 @@ void MainWindow::tryStartupTokenRefreshForPlatform(PlatformId platform)
     }
 
     if (record.refreshToken.trimmed().isEmpty()) {
-        const QString detail = QStringLiteral("Startup auto refresh skipped: refresh token missing.");
+        const QString detail = tr("Startup auto refresh skipped: refresh token missing.");
         m_txtEventLog->append(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 %2").arg(platformKey(platform), detail));
         appendTokenAudit(platform, QStringLiteral("token_refresh"), false, detail);
         return;
     }
 
     if (settings.clientId.trimmed().isEmpty() || settings.tokenEndpoint.trimmed().isEmpty()) {
-        const QString detail = QStringLiteral("Startup auto refresh skipped: OAuth config incomplete.");
+        const QString detail = tr("Startup auto refresh skipped: OAuth config incomplete.");
         m_txtEventLog->append(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 %2").arg(platformKey(platform), detail));
         appendTokenAudit(platform, QStringLiteral("token_refresh"), false, detail);
         return;
     }
     if (platform == PlatformId::Chzzk && settings.clientSecret.trimmed().isEmpty()) {
-        const QString detail = QStringLiteral("Startup auto refresh skipped: CHZZK client_secret missing.");
+        const QString detail = tr("Startup auto refresh skipped: CHZZK client_secret missing.");
         m_txtEventLog->append(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 %2").arg(platformKey(platform), detail));
         appendTokenAudit(platform, QStringLiteral("token_refresh"), false, detail);
         return;
     }
 
     m_configurationDialog->onTokenOperationStarted(platform, QStringLiteral("token_refresh"));
-    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, QStringLiteral("Startup auto refresh..."));
+    m_configurationDialog->onTokenStateUpdated(platform, TokenState::REFRESHING, tr("Startup auto refresh..."));
     if (!startTokenRefreshFlow(platform, settings, record)) {
         m_txtEventLog->append(QStringLiteral("[TOKEN-AUTO-REFRESH-FAIL] %1 start failed").arg(platformKey(platform)));
         return;
@@ -2741,7 +2935,7 @@ bool MainWindow::startTokenRefreshFlow(PlatformId platform, const PlatformSettin
     if (!m_oauthTokenClient.requestRefreshToken(platform, settings, currentRecord.refreshToken, &errorMessage)) {
         m_pendingTokenFlows.remove(platform);
         m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, errorMessage);
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Silent refresh failed"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Silent refresh failed"));
         return false;
     }
 
@@ -2767,7 +2961,7 @@ bool MainWindow::startAuthCodeExchangeFlow(PlatformId platform,
     if (!m_oauthTokenClient.requestAuthorizationCodeToken(platform, settings, code, codeVerifier, authState, &errorMessage)) {
         m_pendingTokenFlows.remove(platform);
         m_configurationDialog->onTokenStateUpdated(platform, TokenState::ERROR, errorMessage);
-        m_configurationDialog->onTokenActionFinished(platform, false, QStringLiteral("Interactive re-auth failed"));
+        m_configurationDialog->onTokenActionFinished(platform, false, tr("Interactive re-auth failed"));
         return false;
     }
 

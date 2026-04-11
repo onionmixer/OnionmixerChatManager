@@ -16,6 +16,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGuiApplication>
@@ -29,25 +30,30 @@
 #include <QVBoxLayout>
 
 namespace {
+QString cfgText(const char* sourceText)
+{
+    return QCoreApplication::translate("ConfigurationDialog", sourceText);
+}
+
 QString tokenStateText(TokenState state)
 {
     switch (state) {
     case TokenState::NO_TOKEN:
-        return QStringLiteral("NO_TOKEN");
+        return cfgText("NO_TOKEN");
     case TokenState::VALID:
-        return QStringLiteral("VALID");
+        return cfgText("VALID");
     case TokenState::EXPIRING_SOON:
-        return QStringLiteral("EXPIRING_SOON");
+        return cfgText("EXPIRING_SOON");
     case TokenState::EXPIRED:
-        return QStringLiteral("EXPIRED");
+        return cfgText("EXPIRED");
     case TokenState::REFRESHING:
-        return QStringLiteral("REFRESHING");
+        return cfgText("REFRESHING");
     case TokenState::AUTH_REQUIRED:
-        return QStringLiteral("AUTH_REQUIRED");
+        return cfgText("AUTH_REQUIRED");
     case TokenState::ERROR:
-        return QStringLiteral("ERROR");
+        return cfgText("ERROR");
     }
-    return QStringLiteral("UNKNOWN");
+    return cfgText("UNKNOWN");
 }
 
 bool isValidLoopbackUri(const QString& uri, const QString& expectedPath)
@@ -93,16 +99,16 @@ bool isLikelyGoogleOAuthClientId(const QString& clientId)
 QString googleClientIdValidationMessage(const QString& parsedClientId)
 {
     if (parsedClientId.isEmpty()) {
-        return QStringLiteral("YouTube client_id format is invalid. Parsed value is empty.");
+        return cfgText("YouTube client_id format is invalid. Parsed value is empty.");
     }
     if (!parsedClientId.contains(QStringLiteral("googleusercontent.com"), Qt::CaseInsensitive)
         && parsedClientId.contains('.')) {
-        return QStringLiteral(
+        return cfgText(
             "YouTube client_id format is invalid. Parsed='%1'. This looks like a bundle/package id. "
             "Use OAuth Client ID ending with *.googleusercontent.com.")
             .arg(parsedClientId);
     }
-    return QStringLiteral("YouTube client_id format is invalid. Parsed='%1'. Expected domain: *.googleusercontent.com")
+    return cfgText("YouTube client_id format is invalid. Parsed='%1'. Expected domain: *.googleusercontent.com")
         .arg(parsedClientId);
 }
 
@@ -225,7 +231,7 @@ QString buildAuditCopyAllText(const QString& summary, const QString& detail)
     const QString copiedAtUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     const QString copiedAtLocal = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
 
-    return QStringLiteral(
+    return cfgText(
                "=== TOKEN AUDIT ===\n"
                "copied_at_utc: %1\n"
                "copied_at_local: %2\n"
@@ -244,19 +250,19 @@ ConfigurationDialog::ConfigurationDialog(QWidget* parent)
     : QDialog(parent)
 {
     setObjectName(QStringLiteral("dlgConfiguration"));
-    setWindowTitle(QStringLiteral("Configuration"));
+    setWindowTitle(tr("Configuration"));
     resize(900, 700);
 
     m_tabConfig = new QTabWidget(this);
     m_tabConfig->setObjectName(QStringLiteral("tabConfig"));
-    m_tabConfig->addTab(createGeneralTab(), QStringLiteral("General"));
-    m_tabConfig->addTab(createYouTubeTab(), QStringLiteral("YouTube"));
-    m_tabConfig->addTab(createChzzkTab(), QStringLiteral("CHZZK"));
-    m_tabConfig->addTab(createSecurityTab(), QStringLiteral("Security"));
+    m_tabConfig->addTab(createGeneralTab(), tr("General"));
+    m_tabConfig->addTab(createYouTubeTab(), tr("YouTube"));
+    m_tabConfig->addTab(createChzzkTab(), tr("CHZZK"));
+    m_tabConfig->addTab(createSecurityTab(), tr("Security"));
 
-    auto* btnApply = new QPushButton(QStringLiteral("Apply"), this);
+    auto* btnApply = new QPushButton(tr("Apply"), this);
     btnApply->setObjectName(QStringLiteral("btnCfgApply"));
-    auto* btnClose = new QPushButton(QStringLiteral("Close"), this);
+    auto* btnClose = new QPushButton(tr("Close"), this);
     btnClose->setObjectName(QStringLiteral("btnCfgClose"));
 
     auto* buttonLayout = new QHBoxLayout;
@@ -329,12 +335,12 @@ void ConfigurationDialog::onTokenOperationStarted(PlatformId platform, const QSt
     m_tokenBusyOperation.insert(platform, operation);
     if (platform == PlatformId::YouTube) {
         if (m_ytLblOperation) {
-            m_ytLblOperation->setText(QStringLiteral("BUSY: %1").arg(operation));
+            m_ytLblOperation->setText(tr("BUSY: %1").arg(operation));
         }
         applyOperationStyle(m_ytLblOperation, true, false, false);
     } else {
         if (m_chzLblOperation) {
-            m_chzLblOperation->setText(QStringLiteral("BUSY: %1").arg(operation));
+            m_chzLblOperation->setText(tr("BUSY: %1").arg(operation));
         }
         applyOperationStyle(m_chzLblOperation, true, false, false);
     }
@@ -370,18 +376,18 @@ void ConfigurationDialog::onTokenActionFinished(PlatformId platform, bool ok, co
     m_tokenBusyOperation.remove(platform);
     if (platform == PlatformId::YouTube) {
         if (m_ytLblOperation) {
-            m_ytLblOperation->setText(QStringLiteral("IDLE"));
+            m_ytLblOperation->setText(tr("IDLE"));
         }
         applyOperationStyle(m_ytLblOperation, false, true, ok);
     } else {
         if (m_chzLblOperation) {
-            m_chzLblOperation->setText(QStringLiteral("IDLE"));
+            m_chzLblOperation->setText(tr("IDLE"));
         }
         applyOperationStyle(m_chzLblOperation, false, true, ok);
     }
     updateTokenUiLockState();
 
-    const QString prefix = ok ? QStringLiteral("OK") : QStringLiteral("FAIL");
+    const QString prefix = ok ? tr("OK") : tr("FAIL");
     if (platform == PlatformId::YouTube) {
         m_ytLblLastRefreshResult->setText(prefix + QStringLiteral(": ") + message);
     } else {
@@ -414,8 +420,8 @@ void ConfigurationDialog::onTokenAuditAppended(PlatformId platform, const QStrin
     m_tblTokenAudit->insertRow(row);
 
     const QString timeText = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
-    const QString platformText = platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK");
-    const QString resultText = ok ? QStringLiteral("OK") : QStringLiteral("FAIL");
+    const QString platformText = platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK");
+    const QString resultText = ok ? tr("OK") : tr("FAIL");
     const QString fullDetail = detail.trimmed();
 
     auto* timeItem = new QTableWidgetItem(timeText);
@@ -495,11 +501,11 @@ void ConfigurationDialog::updateTokenUiLockState()
     }
 
     const QString ytReason = ytBusy
-        ? QStringLiteral("Token operation in progress: %1").arg(m_tokenBusyOperation.value(PlatformId::YouTube))
-        : (interactiveInProgress ? QStringLiteral("Interactive auth is running on another platform") : QString());
+        ? tr("Token operation in progress: %1").arg(m_tokenBusyOperation.value(PlatformId::YouTube))
+        : (interactiveInProgress ? tr("Interactive auth is running on another platform") : QString());
     const QString chzReason = chzBusy
-        ? QStringLiteral("Token operation in progress: %1").arg(m_tokenBusyOperation.value(PlatformId::Chzzk))
-        : (interactiveInProgress ? QStringLiteral("Interactive auth is running on another platform") : QString());
+        ? tr("Token operation in progress: %1").arg(m_tokenBusyOperation.value(PlatformId::Chzzk))
+        : (interactiveInProgress ? tr("Interactive auth is running on another platform") : QString());
 
     if (m_ytBtnTokenRefresh) m_ytBtnTokenRefresh->setToolTip(m_ytBtnTokenRefresh->isEnabled() ? QString() : ytReason);
     if (m_ytBtnReauthBrowser) m_ytBtnReauthBrowser->setToolTip(m_ytBtnReauthBrowser->isEnabled() ? QString() : ytReason);
@@ -567,7 +573,7 @@ void ConfigurationDialog::onApplyClicked()
     }
 
     emit configApplyRequested(snapshot);
-    m_statusBar->showMessage(QStringLiteral("Configuration applied."), 3000);
+        m_statusBar->showMessage(tr("Configuration applied."), 3000);
 }
 
 void ConfigurationDialog::onYouTubeTestConfigClicked()
@@ -604,11 +610,11 @@ void ConfigurationDialog::onTokenAuditCellDoubleClicked(int row, int column)
     const QString platformText = m_tblTokenAudit->item(row, 1) ? m_tblTokenAudit->item(row, 1)->text() : QStringLiteral("-");
     const QString actionText = m_tblTokenAudit->item(row, 2) ? m_tblTokenAudit->item(row, 2)->text() : QStringLiteral("-");
     const QString resultText = m_tblTokenAudit->item(row, 3) ? m_tblTokenAudit->item(row, 3)->text() : QStringLiteral("-");
-    const QString summaryText = QStringLiteral("Time: %1\nPlatform: %2\nAction: %3\nResult: %4")
+    const QString summaryText = tr("Time: %1\nPlatform: %2\nAction: %3\nResult: %4")
                                     .arg(timeText, platformText, actionText, resultText);
 
     auto* dialog = new QDialog(this);
-    dialog->setWindowTitle(QStringLiteral("Token Audit Detail"));
+    dialog->setWindowTitle(tr("Token Audit Detail"));
     dialog->resize(760, 460);
 
     auto* layout = new QVBoxLayout(dialog);
@@ -621,16 +627,16 @@ void ConfigurationDialog::onTokenAuditCellDoubleClicked(int row, int column)
     txtDetail->setPlainText(fullDetail);
 
     auto* buttons = new QDialogButtonBox(Qt::Horizontal, dialog);
-    auto* btnCopySummary = buttons->addButton(QStringLiteral("Copy Summary"), QDialogButtonBox::ActionRole);
-    auto* btnCopy = buttons->addButton(QStringLiteral("Copy Detail"), QDialogButtonBox::ActionRole);
-    auto* btnCopyAll = buttons->addButton(QStringLiteral("Copy All"), QDialogButtonBox::ActionRole);
+    auto* btnCopySummary = buttons->addButton(tr("Copy Summary"), QDialogButtonBox::ActionRole);
+    auto* btnCopy = buttons->addButton(tr("Copy Detail"), QDialogButtonBox::ActionRole);
+    auto* btnCopyAll = buttons->addButton(tr("Copy All"), QDialogButtonBox::ActionRole);
     auto* btnClose = buttons->addButton(QDialogButtonBox::Close);
 
     connect(btnCopySummary, &QPushButton::clicked, this, [this, summaryText]() {
         if (QGuiApplication::clipboard()) {
             QGuiApplication::clipboard()->setText(summaryText);
             if (m_statusBar) {
-                m_statusBar->showMessage(QStringLiteral("Token audit summary copied."), 2000);
+                m_statusBar->showMessage(tr("Token audit summary copied."), 2000);
             }
         }
     });
@@ -638,7 +644,7 @@ void ConfigurationDialog::onTokenAuditCellDoubleClicked(int row, int column)
         if (QGuiApplication::clipboard()) {
             QGuiApplication::clipboard()->setText(txtDetail->toPlainText());
             if (m_statusBar) {
-                m_statusBar->showMessage(QStringLiteral("Token audit detail copied."), 2000);
+                m_statusBar->showMessage(tr("Token audit detail copied."), 2000);
             }
         }
     });
@@ -647,7 +653,7 @@ void ConfigurationDialog::onTokenAuditCellDoubleClicked(int row, int column)
             const QString merged = buildAuditCopyAllText(summaryText, txtDetail->toPlainText());
             QGuiApplication::clipboard()->setText(merged);
             if (m_statusBar) {
-                m_statusBar->showMessage(QStringLiteral("Token audit summary+detail copied."), 2000);
+                m_statusBar->showMessage(tr("Token audit summary+detail copied."), 2000);
             }
         }
     });
@@ -668,7 +674,7 @@ QWidget* ConfigurationDialog::createGeneralTab()
 
     m_cmbLanguage = new QComboBox(page);
     m_cmbLanguage->setObjectName(QStringLiteral("cmbLanguage"));
-    m_cmbLanguage->addItems({ QStringLiteral("ko_KR"), QStringLiteral("en_US") });
+    m_cmbLanguage->addItems({ QStringLiteral("ko_KR"), QStringLiteral("en_US"), QStringLiteral("ja_JP") });
 
     m_cmbLogLevel = new QComboBox(page);
     m_cmbLogLevel->setObjectName(QStringLiteral("cmbLogLevel"));
@@ -678,14 +684,14 @@ QWidget* ConfigurationDialog::createGeneralTab()
     m_cmbMergeOrder->setObjectName(QStringLiteral("cmbMergeOrder"));
     m_cmbMergeOrder->addItems({ QStringLiteral("timestamp") });
 
-    m_chkAutoReconnect = new QCheckBox(QStringLiteral("Enable Auto Reconnect"), page);
+    m_chkAutoReconnect = new QCheckBox(tr("Enable Auto Reconnect"), page);
     m_chkAutoReconnect->setObjectName(QStringLiteral("chkAutoReconnect"));
-    m_chkDetailLog = new QCheckBox(QStringLiteral("Enable Detail Log (TRACE/INFO)"), page);
+    m_chkDetailLog = new QCheckBox(tr("Enable Detail Log (TRACE/INFO)"), page);
     m_chkDetailLog->setObjectName(QStringLiteral("chkDetailLog"));
 
-    layout->addRow(QStringLiteral("Language"), m_cmbLanguage);
-    layout->addRow(QStringLiteral("Log Level"), m_cmbLogLevel);
-    layout->addRow(QStringLiteral("Merge Order"), m_cmbMergeOrder);
+    layout->addRow(tr("Language"), m_cmbLanguage);
+    layout->addRow(tr("Log Level"), m_cmbLogLevel);
+    layout->addRow(tr("Merge Order"), m_cmbMergeOrder);
     layout->addRow(QString(), m_chkAutoReconnect);
     layout->addRow(QString(), m_chkDetailLog);
 
@@ -698,7 +704,7 @@ QWidget* ConfigurationDialog::createYouTubeTab()
     auto* layout = new QVBoxLayout(page);
 
     auto* form = new QFormLayout;
-    m_ytChkEnabled = new QCheckBox(QStringLiteral("Enabled"), page);
+    m_ytChkEnabled = new QCheckBox(tr("Enabled"), page);
     m_ytChkEnabled->setObjectName(QStringLiteral("ytChkEnabled"));
 
     m_ytEdtClientId = new QLineEdit(page);
@@ -707,7 +713,7 @@ QWidget* ConfigurationDialog::createYouTubeTab()
     m_ytEdtClientSecret = new QLineEdit(page);
     m_ytEdtClientSecret->setObjectName(QStringLiteral("ytEdtClientSecret"));
     m_ytEdtClientSecret->setEchoMode(QLineEdit::Password);
-    m_ytEdtClientSecret->setPlaceholderText(QStringLiteral("Optional (required by some OAuth clients)"));
+    m_ytEdtClientSecret->setPlaceholderText(tr("Optional (required by some OAuth clients)"));
 
     m_ytEdtRedirectUri = new QLineEdit(page);
     m_ytEdtRedirectUri->setObjectName(QStringLiteral("ytEdtRedirectUri"));
@@ -729,47 +735,47 @@ QWidget* ConfigurationDialog::createYouTubeTab()
     m_ytEdtChannelHandle->setObjectName(QStringLiteral("ytEdtChannelHandle"));
 
     form->addRow(QString(), m_ytChkEnabled);
-    form->addRow(QStringLiteral("Client ID"), m_ytEdtClientId);
-    form->addRow(QStringLiteral("Client Secret (Optional)"), m_ytEdtClientSecret);
-    form->addRow(QStringLiteral("Redirect URI"), m_ytEdtRedirectUri);
-    form->addRow(QStringLiteral("Auth Endpoint"), m_ytEdtAuthEndpoint);
-    form->addRow(QStringLiteral("Token Endpoint"), m_ytEdtTokenEndpoint);
-    form->addRow(QStringLiteral("Scope"), m_ytEdtScope);
-    form->addRow(QStringLiteral("Channel ID"), m_ytEdtChannelId);
-    form->addRow(QStringLiteral("Channel Handle"), m_ytEdtChannelHandle);
+    form->addRow(tr("Client ID"), m_ytEdtClientId);
+    form->addRow(tr("Client Secret (Optional)"), m_ytEdtClientSecret);
+    form->addRow(tr("Redirect URI"), m_ytEdtRedirectUri);
+    form->addRow(tr("Auth Endpoint"), m_ytEdtAuthEndpoint);
+    form->addRow(tr("Token Endpoint"), m_ytEdtTokenEndpoint);
+    form->addRow(tr("Scope"), m_ytEdtScope);
+    form->addRow(tr("Channel ID"), m_ytEdtChannelId);
+    form->addRow(tr("Channel Handle"), m_ytEdtChannelHandle);
 
-    auto* statusBox = new QGroupBox(QStringLiteral("Token / Account"), page);
+    auto* statusBox = new QGroupBox(tr("Token / Account"), page);
     auto* statusGrid = new QGridLayout(statusBox);
     m_ytLblAccount = new QLabel(QStringLiteral("-"), statusBox);
     m_ytLblAccount->setObjectName(QStringLiteral("ytLblAccount"));
-    m_ytLblTokenState = new QLabel(QStringLiteral("NO_TOKEN"), statusBox);
+    m_ytLblTokenState = new QLabel(tr("NO_TOKEN"), statusBox);
     m_ytLblTokenState->setObjectName(QStringLiteral("ytLblTokenState"));
     m_ytLblAccessExpireAt = new QLabel(QStringLiteral("-"), statusBox);
     m_ytLblAccessExpireAt->setObjectName(QStringLiteral("ytLblAccessExpireAt"));
     m_ytLblLastRefreshResult = new QLabel(QStringLiteral("-"), statusBox);
     m_ytLblLastRefreshResult->setObjectName(QStringLiteral("ytLblLastRefreshResult"));
-    m_ytLblOperation = new QLabel(QStringLiteral("IDLE"), statusBox);
+    m_ytLblOperation = new QLabel(tr("IDLE"), statusBox);
     m_ytLblOperation->setObjectName(QStringLiteral("ytLblOperation"));
 
-    statusGrid->addWidget(new QLabel(QStringLiteral("Account"), statusBox), 0, 0);
+    statusGrid->addWidget(new QLabel(tr("Account"), statusBox), 0, 0);
     statusGrid->addWidget(m_ytLblAccount, 0, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Token State"), statusBox), 1, 0);
+    statusGrid->addWidget(new QLabel(tr("Token State"), statusBox), 1, 0);
     statusGrid->addWidget(m_ytLblTokenState, 1, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Access Expire At"), statusBox), 2, 0);
+    statusGrid->addWidget(new QLabel(tr("Access Expire At"), statusBox), 2, 0);
     statusGrid->addWidget(m_ytLblAccessExpireAt, 2, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Last Result"), statusBox), 3, 0);
+    statusGrid->addWidget(new QLabel(tr("Last Result"), statusBox), 3, 0);
     statusGrid->addWidget(m_ytLblLastRefreshResult, 3, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Operation"), statusBox), 4, 0);
+    statusGrid->addWidget(new QLabel(tr("Operation"), statusBox), 4, 0);
     statusGrid->addWidget(m_ytLblOperation, 4, 1);
 
     auto* actionLayout = new QHBoxLayout;
-    m_ytBtnTokenRefresh = new QPushButton(QStringLiteral("Token Refresh"), page);
+    m_ytBtnTokenRefresh = new QPushButton(tr("Token Refresh"), page);
     m_ytBtnTokenRefresh->setObjectName(QStringLiteral("ytBtnTokenRefresh"));
-    m_ytBtnReauthBrowser = new QPushButton(QStringLiteral("Re-Auth Browser"), page);
+    m_ytBtnReauthBrowser = new QPushButton(tr("Re-Auth Browser"), page);
     m_ytBtnReauthBrowser->setObjectName(QStringLiteral("ytBtnReauthBrowser"));
-    m_ytBtnTokenDelete = new QPushButton(QStringLiteral("Delete Token"), page);
+    m_ytBtnTokenDelete = new QPushButton(tr("Delete Token"), page);
     m_ytBtnTokenDelete->setObjectName(QStringLiteral("ytBtnTokenDelete"));
-    m_ytBtnTestConfig = new QPushButton(QStringLiteral("Test Config"), page);
+    m_ytBtnTestConfig = new QPushButton(tr("Test Config"), page);
     m_ytBtnTestConfig->setObjectName(QStringLiteral("ytBtnTestConfig"));
 
     actionLayout->addWidget(m_ytBtnTokenRefresh);
@@ -790,7 +796,7 @@ QWidget* ConfigurationDialog::createChzzkTab()
     auto* layout = new QVBoxLayout(page);
 
     auto* form = new QFormLayout;
-    m_chzChkEnabled = new QCheckBox(QStringLiteral("Enabled"), page);
+    m_chzChkEnabled = new QCheckBox(tr("Enabled"), page);
     m_chzChkEnabled->setObjectName(QStringLiteral("chzChkEnabled"));
 
     m_chzEdtClientId = new QLineEdit(page);
@@ -823,48 +829,48 @@ QWidget* ConfigurationDialog::createChzzkTab()
     m_chzEdtAccountLabel->setObjectName(QStringLiteral("chzEdtAccountLabel"));
 
     form->addRow(QString(), m_chzChkEnabled);
-    form->addRow(QStringLiteral("Client ID"), m_chzEdtClientId);
-    form->addRow(QStringLiteral("Client Secret"), m_chzEdtClientSecret);
-    form->addRow(QStringLiteral("Redirect URI"), m_chzEdtRedirectUri);
-    form->addRow(QStringLiteral("Auth Endpoint"), m_chzEdtAuthEndpoint);
-    form->addRow(QStringLiteral("Token Endpoint"), m_chzEdtTokenEndpoint);
-    form->addRow(QStringLiteral("Scope"), m_chzEdtScope);
-    form->addRow(QStringLiteral("Channel ID"), m_chzEdtChannelId);
-    form->addRow(QStringLiteral("Channel Name"), m_chzEdtChannelName);
-    form->addRow(QStringLiteral("Account Label"), m_chzEdtAccountLabel);
+    form->addRow(tr("Client ID"), m_chzEdtClientId);
+    form->addRow(tr("Client Secret"), m_chzEdtClientSecret);
+    form->addRow(tr("Redirect URI"), m_chzEdtRedirectUri);
+    form->addRow(tr("Auth Endpoint"), m_chzEdtAuthEndpoint);
+    form->addRow(tr("Token Endpoint"), m_chzEdtTokenEndpoint);
+    form->addRow(tr("Scope"), m_chzEdtScope);
+    form->addRow(tr("Channel ID"), m_chzEdtChannelId);
+    form->addRow(tr("Channel Name"), m_chzEdtChannelName);
+    form->addRow(tr("Account Label"), m_chzEdtAccountLabel);
 
-    auto* statusBox = new QGroupBox(QStringLiteral("Token / Account"), page);
+    auto* statusBox = new QGroupBox(tr("Token / Account"), page);
     auto* statusGrid = new QGridLayout(statusBox);
     m_chzLblAccount = new QLabel(QStringLiteral("-"), statusBox);
     m_chzLblAccount->setObjectName(QStringLiteral("chzLblAccount"));
-    m_chzLblTokenState = new QLabel(QStringLiteral("NO_TOKEN"), statusBox);
+    m_chzLblTokenState = new QLabel(tr("NO_TOKEN"), statusBox);
     m_chzLblTokenState->setObjectName(QStringLiteral("chzLblTokenState"));
     m_chzLblAccessExpireAt = new QLabel(QStringLiteral("-"), statusBox);
     m_chzLblAccessExpireAt->setObjectName(QStringLiteral("chzLblAccessExpireAt"));
     m_chzLblLastRefreshResult = new QLabel(QStringLiteral("-"), statusBox);
     m_chzLblLastRefreshResult->setObjectName(QStringLiteral("chzLblLastRefreshResult"));
-    m_chzLblOperation = new QLabel(QStringLiteral("IDLE"), statusBox);
+    m_chzLblOperation = new QLabel(tr("IDLE"), statusBox);
     m_chzLblOperation->setObjectName(QStringLiteral("chzLblOperation"));
 
-    statusGrid->addWidget(new QLabel(QStringLiteral("Account"), statusBox), 0, 0);
+    statusGrid->addWidget(new QLabel(tr("Account"), statusBox), 0, 0);
     statusGrid->addWidget(m_chzLblAccount, 0, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Token State"), statusBox), 1, 0);
+    statusGrid->addWidget(new QLabel(tr("Token State"), statusBox), 1, 0);
     statusGrid->addWidget(m_chzLblTokenState, 1, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Access Expire At"), statusBox), 2, 0);
+    statusGrid->addWidget(new QLabel(tr("Access Expire At"), statusBox), 2, 0);
     statusGrid->addWidget(m_chzLblAccessExpireAt, 2, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Last Result"), statusBox), 3, 0);
+    statusGrid->addWidget(new QLabel(tr("Last Result"), statusBox), 3, 0);
     statusGrid->addWidget(m_chzLblLastRefreshResult, 3, 1);
-    statusGrid->addWidget(new QLabel(QStringLiteral("Operation"), statusBox), 4, 0);
+    statusGrid->addWidget(new QLabel(tr("Operation"), statusBox), 4, 0);
     statusGrid->addWidget(m_chzLblOperation, 4, 1);
 
     auto* actionLayout = new QHBoxLayout;
-    m_chzBtnTokenRefresh = new QPushButton(QStringLiteral("Token Refresh"), page);
+    m_chzBtnTokenRefresh = new QPushButton(tr("Token Refresh"), page);
     m_chzBtnTokenRefresh->setObjectName(QStringLiteral("chzBtnTokenRefresh"));
-    m_chzBtnReauthBrowser = new QPushButton(QStringLiteral("Re-Auth Browser"), page);
+    m_chzBtnReauthBrowser = new QPushButton(tr("Re-Auth Browser"), page);
     m_chzBtnReauthBrowser->setObjectName(QStringLiteral("chzBtnReauthBrowser"));
-    m_chzBtnTokenDelete = new QPushButton(QStringLiteral("Delete Token"), page);
+    m_chzBtnTokenDelete = new QPushButton(tr("Delete Token"), page);
     m_chzBtnTokenDelete->setObjectName(QStringLiteral("chzBtnTokenDelete"));
-    m_chzBtnTestConfig = new QPushButton(QStringLiteral("Test Config"), page);
+    m_chzBtnTestConfig = new QPushButton(tr("Test Config"), page);
     m_chzBtnTestConfig->setObjectName(QStringLiteral("chzBtnTestConfig"));
 
     actionLayout->addWidget(m_chzBtnTokenRefresh);
@@ -886,18 +892,18 @@ QWidget* ConfigurationDialog::createSecurityTab()
     auto* layout = new QVBoxLayout(page);
     auto* form = new QFormLayout;
 
-    m_lblVaultProvider = new QLabel(QStringLiteral("QtKeychain (planned)"), page);
+    m_lblVaultProvider = new QLabel(tr("QtKeychain (planned)"), page);
     m_lblVaultProvider->setObjectName(QStringLiteral("lblVaultProvider"));
-    m_lblVaultHealth = new QLabel(QStringLiteral("UNKNOWN"), page);
+    m_lblVaultHealth = new QLabel(tr("UNKNOWN"), page);
     m_lblVaultHealth->setObjectName(QStringLiteral("lblVaultHealth"));
 
-    form->addRow(QStringLiteral("Vault Provider"), m_lblVaultProvider);
-    form->addRow(QStringLiteral("Vault Health"), m_lblVaultHealth);
+    form->addRow(tr("Vault Provider"), m_lblVaultProvider);
+    form->addRow(tr("Vault Health"), m_lblVaultHealth);
 
     m_tblTokenAudit = new QTableWidget(page);
     m_tblTokenAudit->setObjectName(QStringLiteral("tblTokenAudit"));
     m_tblTokenAudit->setColumnCount(5);
-    m_tblTokenAudit->setHorizontalHeaderLabels({ QStringLiteral("Time"), QStringLiteral("Platform"), QStringLiteral("Action"), QStringLiteral("Result"), QStringLiteral("Detail") });
+    m_tblTokenAudit->setHorizontalHeaderLabels({ tr("Time"), tr("Platform"), tr("Action"), tr("Result"), tr("Detail") });
     m_tblTokenAudit->verticalHeader()->setVisible(false);
     m_tblTokenAudit->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_tblTokenAudit->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -917,7 +923,7 @@ QWidget* ConfigurationDialog::createSecurityTab()
             }
         });
 
-    m_btnClearTokenAudit = new QPushButton(QStringLiteral("Clear Audit"), page);
+    m_btnClearTokenAudit = new QPushButton(tr("Clear Audit"), page);
     m_btnClearTokenAudit->setObjectName(QStringLiteral("btnClearTokenAudit"));
     connect(m_btnClearTokenAudit, &QPushButton::clicked, this, [this]() {
         if (m_tblTokenAudit) {
@@ -978,7 +984,7 @@ bool ConfigurationDialog::validateSnapshot(const AppSettingsSnapshot& snapshot, 
 {
     if (snapshot.youtube.enabled) {
         if (snapshot.youtube.clientId.isEmpty() || snapshot.youtube.redirectUri.isEmpty() || snapshot.youtube.authEndpoint.isEmpty() || snapshot.youtube.tokenEndpoint.isEmpty() || snapshot.youtube.scope.isEmpty()) {
-            *errorMessage = QStringLiteral("YouTube enabled but required fields are missing.");
+            *errorMessage = tr("YouTube enabled but required fields are missing.");
             return false;
         }
         if (!isLikelyGoogleOAuthClientId(snapshot.youtube.clientId)) {
@@ -986,26 +992,26 @@ bool ConfigurationDialog::validateSnapshot(const AppSettingsSnapshot& snapshot, 
             return false;
         }
         if (!isValidLoopbackUri(snapshot.youtube.redirectUri, QStringLiteral("/youtube/callback"))) {
-            *errorMessage = QStringLiteral("YouTube redirect_uri must be http://127.0.0.1:{port}/youtube/callback");
+            *errorMessage = tr("YouTube redirect_uri must be http://127.0.0.1:{port}/youtube/callback");
             return false;
         }
         if (!isValidHttpsUri(snapshot.youtube.authEndpoint) || !isValidHttpsUri(snapshot.youtube.tokenEndpoint)) {
-            *errorMessage = QStringLiteral("YouTube auth/token endpoint must be https URL.");
+            *errorMessage = tr("YouTube auth/token endpoint must be https URL.");
             return false;
         }
     }
 
     if (snapshot.chzzk.enabled) {
         if (snapshot.chzzk.clientId.isEmpty() || snapshot.chzzk.clientSecret.isEmpty() || snapshot.chzzk.redirectUri.isEmpty() || snapshot.chzzk.authEndpoint.isEmpty() || snapshot.chzzk.tokenEndpoint.isEmpty() || snapshot.chzzk.scope.isEmpty()) {
-            *errorMessage = QStringLiteral("CHZZK enabled but required fields are missing.");
+            *errorMessage = tr("CHZZK enabled but required fields are missing.");
             return false;
         }
         if (!isValidLoopbackUri(snapshot.chzzk.redirectUri, QStringLiteral("/chzzk/callback"))) {
-            *errorMessage = QStringLiteral("CHZZK redirect_uri must be http://127.0.0.1:{port}/chzzk/callback");
+            *errorMessage = tr("CHZZK redirect_uri must be http://127.0.0.1:{port}/chzzk/callback");
             return false;
         }
         if (!isValidHttpsUri(snapshot.chzzk.authEndpoint) || !isValidHttpsUri(snapshot.chzzk.tokenEndpoint)) {
-            *errorMessage = QStringLiteral("CHZZK auth/token endpoint must be https URL.");
+            *errorMessage = tr("CHZZK auth/token endpoint must be https URL.");
             return false;
         }
     }

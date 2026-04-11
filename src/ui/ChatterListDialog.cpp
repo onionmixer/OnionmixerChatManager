@@ -11,7 +11,7 @@
 ChatterListDialog::ChatterListDialog(QWidget* parent)
     : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("Chatter List"));
+    setWindowTitle(tr("Chatter List"));
     resize(680, 520);
 
     auto* rootLayout = new QVBoxLayout(this);
@@ -19,10 +19,10 @@ ChatterListDialog::ChatterListDialog(QWidget* parent)
     m_table->setObjectName(QStringLiteral("tblChatterList"));
     m_table->setColumnCount(4);
     m_table->setHorizontalHeaderLabels({
-        QStringLiteral("Platform"),
-        QStringLiteral("Nickname"),
-        QStringLiteral("Count"),
-        QStringLiteral("Last Seen"),
+        tr("Platform"),
+        tr("Nickname"),
+        tr("Count"),
+        tr("Last Seen"),
     });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -38,7 +38,7 @@ ChatterListDialog::ChatterListDialog(QWidget* parent)
 
     auto* bottomLayout = new QHBoxLayout;
     bottomLayout->addStretch();
-    auto* btnReset = new QPushButton(QStringLiteral("Reset"), this);
+    auto* btnReset = new QPushButton(tr("Reset"), this);
     btnReset->setObjectName(QStringLiteral("btnChatterListReset"));
     connect(btnReset, &QPushButton::clicked, this, &ChatterListDialog::resetRequested);
     bottomLayout->addWidget(btnReset);
@@ -56,7 +56,7 @@ void ChatterListDialog::setEntries(const QVector<ChatterListEntry>& entries)
         const int row = m_table->rowCount();
         m_table->insertRow(row);
 
-        const QString platformText = platformKey(entry.platform);
+        const QString platformText = entry.platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK");
         const QString lastSeenText = entry.lastSeen.isValid()
             ? entry.lastSeen.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
             : QStringLiteral("-");

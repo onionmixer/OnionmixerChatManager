@@ -21,6 +21,7 @@ class ConfigurationDialog;
 class ChatterListDialog;
 class QEvent;
 class QFrame;
+class QGroupBox;
 class QLabel;
 class QNetworkReply;
 class QPlainTextEdit;
@@ -37,6 +38,7 @@ public:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    void changeEvent(QEvent* event) override;
 
 private slots:
     void onConnectToggleClicked();
@@ -76,6 +78,8 @@ private slots:
 
 private:
     void setupUi();
+    void retranslateUi();
+    void recreateAuxiliaryDialogs(bool reopenConfiguration, bool reopenChatterList);
     void refreshConnectButton();
     void refreshChatViewToggleButton();
     void configureChatTableForCurrentView();
@@ -131,6 +135,7 @@ private:
     void probeChzzkLiveStatus(const QString& accessToken);
     void setLiveBroadcastState(PlatformId platform, LiveBroadcastState state, const QString& detail);
     QString liveBroadcastStateText(LiveBroadcastState state) const;
+    QString displayPlatformPhase(const QString& phase) const;
     void refreshLiveBroadcastIndicators();
     void refreshLiveBroadcastIndicator(PlatformId platform);
     void applyLiveBroadcastIndicatorStyle(QFrame* indicator, QLabel* label, PlatformId platform);
@@ -200,9 +205,11 @@ private:
     QPushButton* m_btnToggleChatView = nullptr;
     QPushButton* m_btnOpenChatterList = nullptr;
     QPushButton* m_btnOpenConfiguration = nullptr;
+    QLabel* m_lblStateCaption = nullptr;
     QLabel* m_lblConnectionState = nullptr;
     QLabel* m_lblYouTubeStatus = nullptr;
     QLabel* m_lblChzzkStatus = nullptr;
+    QGroupBox* m_grpActionPanel = nullptr;
     QFrame* m_boxYouTubeRuntime = nullptr;
     QFrame* m_boxChzzkRuntime = nullptr;
     QFrame* m_boxYouTubeLive = nullptr;
@@ -210,6 +217,9 @@ private:
     QLabel* m_lblYouTubeLive = nullptr;
     QLabel* m_lblChzzkLive = nullptr;
     QTableWidget* m_tblChat = nullptr;
+    QLabel* m_lblSelectedPlatformCaption = nullptr;
+    QLabel* m_lblSelectedAuthorCaption = nullptr;
+    QLabel* m_lblSelectedMessageCaption = nullptr;
     QLabel* m_lblSelectedPlatform = nullptr;
     QLabel* m_lblSelectedAuthor = nullptr;
     QLabel* m_lblSelectedMessage = nullptr;
@@ -224,6 +234,7 @@ private:
 
     QVector<UnifiedChatMessage> m_chatMessages;
     QHash<QString, ChatterListEntry> m_chatterStats;
+    QHash<PlatformId, QString> m_platformStatusCodes;
     QStringList m_sendHistory;
     int m_sendHistoryIndex = 0;
     QString m_sendHistoryDraft;

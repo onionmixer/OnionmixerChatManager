@@ -1,6 +1,7 @@
 #include "auth/OAuthLocalServer.h"
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QHostAddress>
 #include <QStringList>
 #include <QTimer>
@@ -9,10 +10,15 @@
 #include <QUrlQuery>
 
 namespace {
+QString oauthText(const char* sourceText)
+{
+    return QCoreApplication::translate("OAuthLocalServer", sourceText);
+}
+
 QByteArray htmlBody(const QString& title, const QString& message)
 {
-    return QStringLiteral("<!doctype html><html><head><meta charset=\"utf-8\"><title>%1</title></head>"
-                          "<body><h3>%1</h3><p>%2</p><p>You can close this tab and return to the app.</p></body></html>")
+    return oauthText("<!doctype html><html><head><meta charset=\"utf-8\"><title>%1</title></head>"
+                     "<body><h3>%1</h3><p>%2</p><p>You can close this tab and return to the app.</p></body></html>")
         .arg(title, message)
         .toUtf8();
 }
@@ -54,14 +60,14 @@ bool OAuthLocalServer::startSession(const OAuthSessionConfig& config, QString* e
 
     if (config.expectedState.trimmed().isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("expectedState is empty");
+            *errorMessage = tr("expectedState is empty");
         }
         return false;
     }
 
     if (m_sessions.contains(config.platform)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("OAuth callback session is already active");
+            *errorMessage = tr("OAuth callback session is already active");
         }
         return false;
     }
@@ -80,7 +86,7 @@ bool OAuthLocalServer::startSession(const OAuthSessionConfig& config, QString* e
     }
     if (!bound) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("listen failed on port %1 (%2)")
+            *errorMessage = tr("listen failed on port %1 (%2)")
                                 .arg(config.redirectUri.port())
                                 .arg(bindErrors.join(QStringLiteral(", ")));
         }
@@ -199,7 +205,7 @@ void OAuthLocalServer::onSocketReadyRead(QTcpSocket* socket)
     socket->setProperty("requestBuffer", buffer);
 
     if (buffer.size() > 8192) {
-        sendHttpResponse(socket, 413, htmlBody(QStringLiteral("OAuth Failed"), QStringLiteral("Request is too large.")));
+        sendHttpResponse(socket, 413, htmlBody(tr("OAuth Failed"), tr("Request is too large.")));
         socket->disconnectFromHost();
         emit sessionFailed(platform, QStringLiteral("OAUTH_CALLBACK_REQUEST_TOO_LARGE"));
         clearSession(platform);
@@ -214,7 +220,7 @@ void OAuthLocalServer::onSocketReadyRead(QTcpSocket* socket)
     const QByteArray requestLine = buffer.left(lineEnd).trimmed();
     const QList<QByteArray> parts = requestLine.split(' ');
     if (parts.size() < 2 || parts.first() != QByteArrayLiteral("GET")) {
-        sendHttpResponse(socket, 400, htmlBody(QStringLiteral("OAuth Failed"), QStringLiteral("Invalid callback request.")));
+        sendHttpResponse(socket, 400, htmlBody(tr("OAuth Failed"), tr("Invalid callback request.")));
         socket->disconnectFromHost();
         emit sessionFailed(platform, QStringLiteral("OAUTH_INVALID_REQUEST_LINE"));
         clearSession(platform);
@@ -224,7 +230,7 @@ void OAuthLocalServer::onSocketReadyRead(QTcpSocket* socket)
     const QUrl relativeUrl = QUrl::fromEncoded(parts.at(1));
     const QString path = relativeUrl.path().isEmpty() ? QStringLiteral("/") : relativeUrl.path();
     if (path != session.expectedPath) {
-        sendHttpResponse(socket, 404, htmlBody(QStringLiteral("OAuth Callback"), QStringLiteral("Path mismatch.")));
+        sendHttpResponse(socket, 404, htmlBody(tr("OAuth Callback"), tr("Path mismatch.")));
         socket->disconnectFromHost();
         return;
     }
@@ -236,7 +242,7 @@ void OAuthLocalServer::onSocketReadyRead(QTcpSocket* socket)
     const QString errorDescription = query.queryItemValue(QStringLiteral("error_description"));
 
     if (state.trimmed().isEmpty() || state != session.expectedState) {
-        sendHttpResponse(socket, 400, htmlBody(QStringLiteral("OAuth Failed"), QStringLiteral("State verification failed.")));
+        sendHttpResponse(socket, 400, htmlBody(tr("OAuth Failed"), tr("State verification failed.")));
         socket->disconnectFromHost();
         emit sessionFailed(platform, QStringLiteral("OAUTH_STATE_MISMATCH"));
         clearSession(platform);
@@ -244,7 +250,7 @@ void OAuthLocalServer::onSocketReadyRead(QTcpSocket* socket)
     }
 
     if (errorCode.trimmed().isEmpty() && code.trimmed().isEmpty()) {
-        sendHttpResponse(socket, 400, htmlBody(QStringLiteral("OAuth Failed"), QStringLiteral("Missing authorization code.")));
+        sendHttpResponse(socket, 400, htmlBody(tr("OAuth Failed"), tr("Missing authorization code.")));
         socket->disconnectFromHost();
         emit sessionFailed(platform, QStringLiteral("OAUTH_CODE_MISSING"));
         clearSession(platform);
@@ -252,9 +258,9 @@ void OAuthLocalServer::onSocketReadyRead(QTcpSocket* socket)
     }
 
     if (!errorCode.trimmed().isEmpty()) {
-        sendHttpResponse(socket, 200, htmlBody(QStringLiteral("OAuth Failed"), QStringLiteral("Authorization was not completed.")));
+        sendHttpResponse(socket, 200, htmlBody(tr("OAuth Failed"), tr("Authorization was not completed.")));
     } else {
-        sendHttpResponse(socket, 200, htmlBody(QStringLiteral("OAuth Complete"), QStringLiteral("Authorization completed successfully.")));
+        sendHttpResponse(socket, 200, htmlBody(tr("OAuth Complete"), tr("Authorization completed successfully.")));
     }
 
     socket->disconnectFromHost();
@@ -302,35 +308,35 @@ bool OAuthLocalServer::validateRedirectUri(const QUrl& uri, QString* reason) con
 {
     if (!uri.isValid()) {
         if (reason) {
-            *reason = QStringLiteral("redirect_uri is invalid");
+            *reason = tr("redirect_uri is invalid");
         }
         return false;
     }
 
     if (uri.scheme() != QStringLiteral("http")) {
         if (reason) {
-            *reason = QStringLiteral("redirect_uri scheme must be http");
+            *reason = tr("redirect_uri scheme must be http");
         }
         return false;
     }
 
     if (uri.host() != QStringLiteral("127.0.0.1") && uri.host() != QStringLiteral("localhost")) {
         if (reason) {
-            *reason = QStringLiteral("redirect_uri host must be 127.0.0.1 or localhost");
+            *reason = tr("redirect_uri host must be 127.0.0.1 or localhost");
         }
         return false;
     }
 
     if (uri.port() <= 0) {
         if (reason) {
-            *reason = QStringLiteral("redirect_uri must include a valid port");
+            *reason = tr("redirect_uri must include a valid port");
         }
         return false;
     }
 
     if (uri.path().trimmed().isEmpty()) {
         if (reason) {
-            *reason = QStringLiteral("redirect_uri path is empty");
+            *reason = tr("redirect_uri path is empty");
         }
         return false;
     }

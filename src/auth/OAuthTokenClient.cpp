@@ -1,5 +1,6 @@
 #include "auth/OAuthTokenClient.h"
 
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
@@ -10,6 +11,11 @@
 #include <QUrlQuery>
 
 namespace {
+QString tokenClientText(const char* sourceText)
+{
+    return QCoreApplication::translate("OAuthTokenClient", sourceText);
+}
+
 const QString kFlowAuthorizationCode = QStringLiteral("authorization_code");
 const QString kFlowRefreshToken = QStringLiteral("refresh_token");
 const QString kFlowTokenRevoke = QStringLiteral("token_revoke");
@@ -113,7 +119,7 @@ bool OAuthTokenClient::requestAuthorizationCodeToken(PlatformId platform,
 {
     if (code.trimmed().isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Authorization code is empty.");
+            *errorMessage = tokenClientText("Authorization code is empty.");
         }
         return false;
     }
@@ -122,13 +128,13 @@ bool OAuthTokenClient::requestAuthorizationCodeToken(PlatformId platform,
     if (platform == PlatformId::Chzzk) {
         if (settings.clientId.trimmed().isEmpty() || settings.clientSecret.trimmed().isEmpty()) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("CHZZK authorization_code requires clientId and clientSecret.");
+                *errorMessage = tokenClientText("CHZZK authorization_code requires clientId and clientSecret.");
             }
             return false;
         }
         if (authState.trimmed().isEmpty()) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("CHZZK authorization_code requires state.");
+                *errorMessage = tokenClientText("CHZZK authorization_code requires state.");
             }
             return false;
         }
@@ -160,7 +166,7 @@ bool OAuthTokenClient::requestRefreshToken(PlatformId platform,
 {
     if (refreshToken.trimmed().isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Refresh token is empty.");
+            *errorMessage = tokenClientText("Refresh token is empty.");
         }
         return false;
     }
@@ -169,7 +175,7 @@ bool OAuthTokenClient::requestRefreshToken(PlatformId platform,
     if (platform == PlatformId::Chzzk) {
         if (settings.clientId.trimmed().isEmpty() || settings.clientSecret.trimmed().isEmpty()) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("CHZZK refresh_token requires clientId and clientSecret.");
+                *errorMessage = tokenClientText("CHZZK refresh_token requires clientId and clientSecret.");
             }
             return false;
         }
@@ -196,7 +202,7 @@ bool OAuthTokenClient::requestRevokeToken(PlatformId platform,
 {
     if (!m_network) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Network manager is null.");
+            *errorMessage = tokenClientText("Network manager is null.");
         }
         return false;
     }
@@ -206,7 +212,7 @@ bool OAuthTokenClient::requestRevokeToken(PlatformId platform,
         : record.accessToken.trimmed();
     if (token.isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("No token available to revoke.");
+            *errorMessage = tokenClientText("No token available to revoke.");
         }
         return false;
     }
@@ -219,7 +225,7 @@ bool OAuthTokenClient::requestRevokeToken(PlatformId platform,
     } else {
         if (settings.clientId.trimmed().isEmpty() || settings.clientSecret.trimmed().isEmpty()) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("CHZZK revoke requires client_id and client_secret.");
+                *errorMessage = tokenClientText("CHZZK revoke requires client_id and client_secret.");
             }
             return false;
         }
@@ -233,7 +239,7 @@ bool OAuthTokenClient::requestRevokeToken(PlatformId platform,
 
     if (!endpoint.isValid() || endpoint.scheme() != QStringLiteral("https") || endpoint.host().trimmed().isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("revoke endpoint must be a valid https URL.");
+            *errorMessage = tokenClientText("revoke endpoint must be a valid https URL.");
         }
         return false;
     }
@@ -262,7 +268,7 @@ bool OAuthTokenClient::requestRevokeToken(PlatformId platform,
     QNetworkReply* reply = m_network->post(request, requestBody);
     if (!reply) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Failed to create network reply.");
+            *errorMessage = tokenClientText("Failed to create network reply.");
         }
         return false;
     }
@@ -306,7 +312,7 @@ bool OAuthTokenClient::requestRevokeToken(PlatformId platform,
             emit tokenRevokeFailed(platform,
                 flow,
                 QStringLiteral("CHZZK_TOKEN_REVOKE_FAILED"),
-                chzzkMsg.trimmed().isEmpty() ? QStringLiteral("CHZZK token revoke failed") : chzzkMsg,
+                chzzkMsg.trimmed().isEmpty() ? tokenClientText("CHZZK token revoke failed") : chzzkMsg,
                 httpStatus);
             reply->deleteLater();
             return;
@@ -327,14 +333,14 @@ bool OAuthTokenClient::postTokenRequest(PlatformId platform,
 {
     if (!m_network) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Network manager is null.");
+            *errorMessage = tokenClientText("Network manager is null.");
         }
         return false;
     }
 
     if (settings.clientId.trimmed().isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("client id is empty.");
+            *errorMessage = tokenClientText("client id is empty.");
         }
         return false;
     }
@@ -342,7 +348,7 @@ bool OAuthTokenClient::postTokenRequest(PlatformId platform,
     const QUrl tokenEndpoint(settings.tokenEndpoint);
     if (!tokenEndpoint.isValid() || tokenEndpoint.scheme() != QStringLiteral("https") || tokenEndpoint.host().trimmed().isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("token_endpoint must be a valid https URL.");
+            *errorMessage = tokenClientText("token_endpoint must be a valid https URL.");
         }
         return false;
     }
@@ -373,7 +379,7 @@ bool OAuthTokenClient::postTokenRequest(PlatformId platform,
     QNetworkReply* reply = m_network->post(request, requestBody);
     if (!reply) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Failed to create network reply.");
+            *errorMessage = tokenClientText("Failed to create network reply.");
         }
         return false;
     }
@@ -418,7 +424,7 @@ bool OAuthTokenClient::postTokenRequest(PlatformId platform,
                     errCode = QString::number(apiCode);
                 }
                 if (errMsg.trimmed().isEmpty()) {
-                    errMsg = QStringLiteral("CHZZK token exchange failed");
+                    errMsg = tokenClientText("CHZZK token exchange failed");
                 }
                 emit tokenFailed(platform, flow, errCode, errMsg, httpStatus);
                 reply->deleteLater();

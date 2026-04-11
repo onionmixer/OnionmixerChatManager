@@ -2083,6 +2083,116 @@ struct ValidationResult {
 1. 방송 OFF 상태 Connect 시 `YouTube: CONNECTED_NO_LIVECHAT` 표시
 2. 방송 ON 후 `liveChatId` 확보 시 `YouTube: CONNECTED` 전환
 3. quota 오류 발생 시 즉시 `FAILED`로 떨어지지 않고 재시도 유지
+
+## 28. 다국어 지원 구조 개편
+
+### 28.1 목표
+
+- `Configuration > General > Language` 값이 실제 UI 언어에 반영되도록 한다.
+- 언어 리소스는 코드 하드코딩이 아니라 별도 언어 파일(`.ts` / `.qm`)로 관리한다.
+- 내부 상태코드와 사용자 표시문구를 분리해, 번역 적용이 런타임 로직을 깨뜨리지 않도록 한다.
+
+### 28.2 지원 언어
+
+- 1차 지원:
+  - `ko_KR`
+  - `en_US`
+  - `ja_JP`
+- 설정 저장 키:
+  - `[app] language=ko_KR|en_US|ja_JP`
+
+### 28.3 파일/빌드 구조
+
+- 소스 번역 파일:
+  - `translations/botmanager_ko_KR.ts`
+  - `translations/botmanager_en_US.ts`
+  - `translations/botmanager_ja_JP.ts`
+- 빌드 산출물:
+  - `translations/botmanager_ko_KR.qm`
+  - `translations/botmanager_en_US.qm`
+  - `translations/botmanager_ja_JP.qm`
+- CMake:
+  - `Qt5::LinguistTools` 사용 가능 시 `.ts -> .qm` 빌드 타겟 추가
+  - 실행 파일은 빌드 결과 `translations/` 디렉터리의 `.qm`을 로드
+
+### 28.4 런타임 적용 정책
+
+- 앱 시작 시:
+  - `config/app.ini`의 `[app]language`를 먼저 읽는다.
+  - `QTranslator`를 설치한 뒤 `MainWindow`를 생성한다.
+- Configuration에서 `Language` 변경 후 `Apply` 시:
+  - `QTranslator`를 다시 로드한다.
+  - `MainWindow`는 `retranslateUi()`로 즉시 반영한다.
+  - `ConfigurationDialog`, `ChatterListDialog`는 현재 구조 단순화를 위해 재생성하여 새 언어를 반영한다.
+
+### 28.5 번역 경계 규칙
+
+- 번역 대상:
+  - 윈도우 타이틀
+  - 버튼/탭/그룹박스 제목
+  - 테이블 헤더
+  - 폼 레이블
+  - placeholder
+  - 상태바 사용자 메시지
+  - 토큰/감사창의 사용자 표시 문구
+- 비번역 또는 제한 번역 대상:
+  - 이벤트 로그 prefix (`[WARN]`, `[LIVE]`, `[CHAT]`, `[CONNECT]`)
+  - 내부 에러 코드 (`TRACE_*`, `INFO_*`, `TOKEN_*`)
+  - API 원문 에러 body / 서버 메시지
+
+### 28.6 내부 상태와 표시문구 분리
+
+- 다음 값들은 내부적으로는 영문 코드로 유지한다:
+  - `IDLE`
+  - `STARTING`
+  - `CONNECTED`
+  - `FAILED`
+  - `CONNECTED_NO_LIVECHAT`
+  - `CONNECTED_NO_SESSIONKEY`
+  - `CONNECTED_NO_SUBSCRIBE`
+  - `UNKNOWN`
+  - `CHECKING`
+  - `ONLINE`
+  - `OFFLINE`
+  - `ERROR`
+- 화면 표시 시에만 별도 표시 함수로 번역 문자열로 변환한다.
+- 금지:
+  - 번역된 문자열을 기준으로 연결 상태/토큰 상태/라이브 상태를 판정하는 로직
+
+### 28.7 1차 구현 범위
+
+- `MainWindow`
+  - Connect/Disconnect 버튼
+  - 채팅 보기 토글
+  - Actions 패널
+  - 상태 라벨
+  - 채팅 테이블 헤더
+  - 메시지 입력 placeholder
+  - 라이브/토큰 범례
+- `ConfigurationDialog`
+  - 탭 제목
+  - General / YouTube / CHZZK / Security 정적 UI 텍스트
+  - 토큰 감사 상세 다이얼로그 버튼/헤더
+- `ChatterListDialog`
+  - 창 제목
+  - 테이블 헤더
+  - Reset 버튼
+
+### 28.8 2차 확장 범위
+
+- OAuth 실패/가이드 메시지 전체 번역
+- ActionExecutor 결과 메시지 번역 계층화
+- 이벤트 로그 detail 문구의 선택적 현지화
+- 다국어 QA 체크리스트 자동화
+
+### 28.9 검증 체크리스트
+
+1. `language=ko_KR`로 시작 시 메인/설정/채팅자 목록 UI가 한국어로 표시된다.
+2. `language=en_US`로 시작 시 메인/설정/채팅자 목록 UI가 영어로 표시된다.
+3. 실행 중 `Language` 변경 후 `Apply` 시 `MainWindow`가 즉시 재번역된다.
+4. `ConfigurationDialog`, `ChatterListDialog`는 재생성 후 새 언어로 열린다.
+5. 내부 상태코드 비교 로직이 번역 문자열과 무관하게 유지된다.
+6. `TRACE_*`, `INFO_*` 로그 코드는 언어 변경 후에도 그대로 유지된다.
 4. Detail Log OFF에서도 상태 전환(`CONNECTED_NO_LIVECHAT` <-> `CONNECTED`)은 정상 반영
 
 ## 28. Token 상태와 Live 상태 분리 규약
