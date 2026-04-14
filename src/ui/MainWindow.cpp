@@ -1635,6 +1635,18 @@ void MainWindow::onChatReceived(const UnifiedChatMessage& message)
 
 void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel)
 {
+    const QString msgId = message.messageId.trimmed();
+    if (!msgId.isEmpty()) {
+        if (m_recentMessageIds.contains(msgId)) {
+            return;
+        }
+        m_recentMessageIds.insert(msgId);
+        if (m_recentMessageIds.size() > 2000) {
+            m_recentMessageIds.clear();
+            m_recentMessageIds.insert(msgId);
+        }
+    }
+
     m_chatMessages.push_back(message);
 
     const int maxMessages = m_snapshot.chatMaxMessages;

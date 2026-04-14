@@ -255,6 +255,7 @@ private:
     ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
     bool m_detailLogEnabled = false;
     bool m_chatterRefreshPending = false;
+    QSet<QString> m_recentMessageIds;
 };
 
 #endif // MAIN_WINDOW_H

@@ -334,12 +334,16 @@ UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const
             text += run.value(QStringLiteral("text")).toString();
         } else if (run.contains(QStringLiteral("emoji"))) {
             const QJsonObject emoji = run.value(QStringLiteral("emoji")).toObject();
-            const QJsonArray shortcuts = emoji.value(QStringLiteral("shortcuts")).toArray();
-            if (!shortcuts.isEmpty()) {
-                text += shortcuts.first().toString();
+            const bool isCustom = emoji.value(QStringLiteral("isCustomEmoji")).toBool(false);
+            const QString emojiId = emoji.value(QStringLiteral("emojiId")).toString();
+            if (!isCustom && !emojiId.isEmpty() && !emojiId.contains(QLatin1Char('/'))) {
+                text += emojiId;
             } else {
-                const QString emojiId = emoji.value(QStringLiteral("emojiId")).toString();
-                if (!emojiId.isEmpty()) {
+                const QJsonArray shortcuts = emoji.value(QStringLiteral("shortcuts")).toArray();
+                const QString shortcut = shortcuts.isEmpty() ? QString() : shortcuts.first().toString();
+                if (!shortcut.isEmpty()) {
+                    text += shortcut;
+                } else if (!emojiId.isEmpty()) {
                     text += emojiId;
                 }
             }

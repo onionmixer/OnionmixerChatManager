@@ -300,7 +300,16 @@ void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
         return;
     }
 
+    if (m_webChatClient && m_webChatClient->isRunning()) {
+        m_webChatClient->stop();
+        m_webChatFailureCount = 0;
+        m_webChatFallbackUntilUtc = QDateTime();
+        scheduleNextTick(100);
+        return;
+    }
+
     if (m_liveChatId.isEmpty()) {
+        setLiveStateChecking(QStringLiteral("Token updated, re-checking live state."));
         scheduleNextTick(100);
         return;
     }
@@ -379,10 +388,25 @@ void YouTubeAdapter::publishReceivedMessage(UnifiedChatMessage message)
     if (messageId.isEmpty() || m_seenMessageIds.contains(messageId)) {
         return;
     }
+
+    if (m_lastPublishedTimestampUtc.isValid() && message.timestamp.isValid()) {
+        const qint64 diffSec = message.timestamp.toUTC().secsTo(m_lastPublishedTimestampUtc);
+        if (diffSec > 5) {
+            return;
+        }
+    }
+
     m_seenMessageIds.insert(messageId);
-    if (m_seenMessageIds.size() > 4000) {
+    if (m_seenMessageIds.size() > 10000) {
         m_seenMessageIds.clear();
         m_seenMessageIds.insert(messageId);
+    }
+
+    if (message.timestamp.isValid()) {
+        const QDateTime utc = message.timestamp.toUTC();
+        if (!m_lastPublishedTimestampUtc.isValid() || utc > m_lastPublishedTimestampUtc) {
+            m_lastPublishedTimestampUtc = utc;
+        }
     }
 
     message.platform = platformId();
@@ -624,12 +648,15 @@ void YouTubeAdapter::onWebChatFailed(const QString& code, const QString& detail)
     emit error(platformId(), code, detail);
     ++m_webChatFailureCount;
     if (m_webChatFailureCount >= 3) {
+        m_bootstrapDiscoverAttempts = qMin(m_bootstrapDiscoverAttempts, 3);
         m_webChatFallbackUntilUtc = QDateTime::currentDateTimeUtc().addSecs(300);
         emit error(platformId(), QStringLiteral("INFO_YT_WEBCHAT_FALLBACK"),
             QStringLiteral("InnerTube web chat failed %1 times; falling back to other transports for 300s.")
                 .arg(m_webChatFailureCount));
     }
-    scheduleNextTick(3000);
+    setLiveStateChecking(QStringLiteral("Retrying chat connection..."));
+    const int backoffMs = qMin(3000 * m_webChatFailureCount, 15000);
+    scheduleNextTick(qMax(backoffMs, 3000));
 }
 
 void YouTubeAdapter::onWebChatEnded(const QString& reason)
@@ -642,6 +669,7 @@ void YouTubeAdapter::onWebChatEnded(const QString& reason)
     m_discoveredVideoId.clear();
     m_nextPageToken.clear();
     m_bootstrapSearchFallbackTried = false;
+    m_bootstrapDiscoverAttempts = qMin(m_bootstrapDiscoverAttempts, 3);
     m_announcedLiveChatPending = false;
     m_nextWebFallbackAllowedAtUtc = QDateTime();
     setLiveStateOffline(reason);
@@ -741,6 +769,7 @@ void YouTubeAdapter::start(const PlatformSettings& settings)
     m_lastLiveStateCode.clear();
     m_lastLiveStateDetail.clear();
     m_discoveredVideoId.clear();
+    m_lastPublishedTimestampUtc = QDateTime();
     m_webChatFailureCount = 0;
     m_webChatFallbackUntilUtc = QDateTime();
     m_streamTransportReady = false;

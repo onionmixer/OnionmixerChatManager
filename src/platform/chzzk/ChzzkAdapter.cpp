@@ -564,6 +564,8 @@ void ChzzkAdapter::onSocketConnected()
 
 void ChzzkAdapter::onSocketDisconnected()
 {
+    m_seenMessageIds.clear();
+
     if (m_stopping) {
         return;
     }
@@ -744,7 +746,7 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
             msg.channelId = m_channelId;
         }
         msg.channelName = m_channelName.isEmpty() ? QStringLiteral("CHZZK") : m_channelName;
-        msg.messageId = readStringByKeys(payload, QJsonObject(), { QStringLiteral("messageId"), QStringLiteral("chatId"), QStringLiteral("id"), QStringLiteral("uid") });
+        msg.messageId = readStringByKeys(payload, QJsonObject(), { QStringLiteral("messageId"), QStringLiteral("chatId") });
         msg.authorId = readStringByKeys(payload, profile, { QStringLiteral("senderChannelId"), QStringLiteral("userId"), QStringLiteral("uid"), QStringLiteral("memberNo") });
         msg.authorName = readStringByKeys(profile, payload, { QStringLiteral("nickname"), QStringLiteral("name"), QStringLiteral("senderNickname"), QStringLiteral("profileName") });
 

@@ -94,6 +94,7 @@ private:
     QString m_liveChatId;
     QString m_nextPageToken;
     QSet<QString> m_seenMessageIds;
+    QDateTime m_lastPublishedTimestampUtc;
     int m_bootstrapDiscoverAttempts = 0;
     bool m_bootstrapSearchFallbackTried = false;
     bool m_announcedLiveChatPending = false;

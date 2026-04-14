@@ -191,14 +191,14 @@ void YouTubeLiveChatWebClient::handleInitialPageResponse(QNetworkReply* reply)
                                    .toObject()
                                    .value(QStringLiteral("actions"))
                                    .toArray();
+    emit started();
+
     if (!actions.isEmpty()) {
         const QVector<UnifiedChatMessage> messages = parseActions(actions);
         if (!messages.isEmpty()) {
             emit messagesReceived(messages);
         }
     }
-
-    emit started();
 
     const int timeoutMs = extractTimeoutMs(root);
     m_pollTimer->start(clampPollInterval(timeoutMs));
