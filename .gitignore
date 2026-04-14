@@ -10,3 +10,6 @@
 
 # Local report artifacts
 /report*
+
+# Fix analysis documents
+FIX_*
