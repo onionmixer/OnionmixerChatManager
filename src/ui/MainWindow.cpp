@@ -1615,6 +1615,12 @@ void MainWindow::onChatReceived(const UnifiedChatMessage& message)
 {
     const QString authorLabel = displayAuthorLabel(message);
     maybeQueueYouTubeAuthorHandleLookup(message);
+
+    const QString msgId = message.messageId.trimmed();
+    if (!msgId.isEmpty() && m_recentMessageIds.contains(msgId)) {
+        return;
+    }
+
     recordChatter(message, authorLabel);
     appendChatMessage(message, authorLabel);
     m_txtEventLog->append(QStringLiteral("[CHAT] %1 author=%2 text=%3")

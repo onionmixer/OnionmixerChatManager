@@ -404,8 +404,11 @@ void YouTubeAdapter::publishReceivedMessage(UnifiedChatMessage message)
 
     if (message.timestamp.isValid()) {
         const QDateTime utc = message.timestamp.toUTC();
-        if (!m_lastPublishedTimestampUtc.isValid() || utc > m_lastPublishedTimestampUtc) {
-            m_lastPublishedTimestampUtc = utc;
+        const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+        const QDateTime cap = nowUtc.addSecs(10);
+        const QDateTime clamped = (utc > cap) ? cap : utc;
+        if (!m_lastPublishedTimestampUtc.isValid() || clamped > m_lastPublishedTimestampUtc) {
+            m_lastPublishedTimestampUtc = clamped;
         }
     }
 
