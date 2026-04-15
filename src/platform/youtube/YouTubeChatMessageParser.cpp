@@ -1,7 +1,9 @@
 #include "platform/youtube/YouTubeChatMessageParser.h"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QStringList>
 
@@ -338,26 +340,58 @@ UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const
             richText += t.toHtmlEscaped();
         } else if (run.contains(QStringLiteral("emoji"))) {
             const QJsonObject emoji = run.value(QStringLiteral("emoji")).toObject();
+            qDebug() << "[EMOJI-TRACE]" << QJsonDocument(emoji).toJson(QJsonDocument::Compact).left(500);
             const bool isCustom = emoji.value(QStringLiteral("isCustomEmoji")).toBool(false);
             const QString emojiId = emoji.value(QStringLiteral("emojiId")).toString();
             if (!isCustom && !emojiId.isEmpty() && !emojiId.contains(QLatin1Char('/'))) {
                 text += emojiId;
                 richText += emojiId.toHtmlEscaped();
             } else {
-                // Extract image URL from thumbnails
+                // Extract image URL — try multiple paths (YouTube global emotes
+                // may have thumbnails in different locations)
                 QString imageUrl;
-                const QJsonArray thumbnails = emoji.value(QStringLiteral("image"))
-                    .toObject().value(QStringLiteral("thumbnails")).toArray();
+                const QJsonObject imageObj = emoji.value(QStringLiteral("image")).toObject();
+
+                // Path 1: emoji.image.thumbnails[] (custom emoji + some global)
+                const QJsonArray thumbnails = imageObj.value(QStringLiteral("thumbnails")).toArray();
                 for (const QJsonValue& t : thumbnails) {
-                    const QJsonObject thumb = t.toObject();
-                    const int w = thumb.value(QStringLiteral("width")).toInt();
-                    if (w >= 24 && w <= 48) {
-                        imageUrl = thumb.value(QStringLiteral("url")).toString();
+                    const QString url = t.toObject().value(QStringLiteral("url")).toString().trimmed();
+                    if (!url.isEmpty()) {
+                        imageUrl = url;
                         break;
                     }
                 }
-                if (imageUrl.isEmpty() && !thumbnails.isEmpty()) {
-                    imageUrl = thumbnails.first().toObject().value(QStringLiteral("url")).toString();
+                // Path 2: emoji.image.url (direct URL field)
+                if (imageUrl.isEmpty()) {
+                    imageUrl = imageObj.value(QStringLiteral("url")).toString().trimmed();
+                }
+                // Path 3: emoji.thumbnails[] (without image wrapper)
+                if (imageUrl.isEmpty()) {
+                    const QJsonArray directThumbs = emoji.value(QStringLiteral("thumbnails")).toArray();
+                    for (const QJsonValue& t : directThumbs) {
+                        const QString url = t.toObject().value(QStringLiteral("url")).toString().trimmed();
+                        if (!url.isEmpty()) {
+                            imageUrl = url;
+                            break;
+                        }
+                    }
+                }
+                // Path 4: emoji.url (direct on emoji object)
+                if (imageUrl.isEmpty()) {
+                    imageUrl = emoji.value(QStringLiteral("url")).toString().trimmed();
+                }
+                // Path 5: accessibility label image URL
+                if (imageUrl.isEmpty()) {
+                    const QJsonArray accThumbs = imageObj.value(QStringLiteral("accessibility"))
+                        .toObject().value(QStringLiteral("accessibilityData"))
+                        .toObject().value(QStringLiteral("thumbnails")).toArray();
+                    for (const QJsonValue& t : accThumbs) {
+                        const QString url = t.toObject().value(QStringLiteral("url")).toString().trimmed();
+                        if (!url.isEmpty()) {
+                            imageUrl = url;
+                            break;
+                        }
+                    }
                 }
 
                 const QJsonArray shortcuts = emoji.value(QStringLiteral("shortcuts")).toArray();
