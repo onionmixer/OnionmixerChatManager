@@ -13,3 +13,9 @@
 
 # Fix analysis documents
 FIX_*
+
+# Plan documents
+PLAN_*
+
+# External reference sources (submodule-incompatible repos)
+/etc/
