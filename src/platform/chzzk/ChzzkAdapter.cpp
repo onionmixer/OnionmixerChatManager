@@ -580,7 +580,20 @@ void ChzzkAdapter::onSocketDisconnected()
     emit error(platformId(), QStringLiteral("TRACE_CHZZK_SOCKET_DISCONNECTED"), QStringLiteral("socket disconnected"));
     if (wasConnected) {
         m_connectSignalEmitted = false;
-        emit disconnected(platformId());
+        m_chatSubscribed = false;
+        m_subscribeInFlight = false;
+        m_subscribeRetryCount = 0;
+        m_sessionKey.clear();
+        emit error(platformId(), QStringLiteral("INFO_CHZZK_RECONNECTING"),
+            QStringLiteral("Socket disconnected, attempting reconnection in 3 seconds."));
+        QTimer::singleShot(3000, this, [this]() {
+            if (m_stopping) {
+                return;
+            }
+            emit error(platformId(), QStringLiteral("INFO_CHZZK_RECONNECT_START"),
+                QStringLiteral("Reconnecting to CHZZK session."));
+            requestSessionAuth();
+        });
     }
 }
 
