@@ -1,11 +1,13 @@
 #include "ui/MainWindow.h"
 
 #include "auth/PkceUtil.h"
+#include "platform/youtube/EmojiImageCache.h"
 #include "i18n/AppLanguage.h"
 #include "ui/ConfigurationDialog.h"
 
 #include <algorithm>
 #include <QAction>
+#include <QBuffer>
 #include <QAbstractItemView>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -216,6 +218,7 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     , m_youtubeAdapter(this)
     , m_chzzkAdapter(this)
 {
+    m_emojiCache = new EmojiImageCache(&m_networkAccessManager, this);
     setupUi();
 
     m_snapshot = m_settings.load();
@@ -1865,11 +1868,39 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
             ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
             : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle));
 
-    auto* lblMessage = new QLabel(message.text.toHtmlEscaped(), wrap);
+    auto* lblMessage = new QLabel(wrap);
+    lblMessage->setTextFormat(Qt::RichText);
+    lblMessage->setTextInteractionFlags(Qt::NoTextInteraction);
     lblMessage->setWordWrap(true);
     lblMessage->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     lblMessage->setFocusPolicy(Qt::NoFocus);
     lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2").arg(fontSize).arg(fontExtraStyle));
+    {
+        QString html = message.richText.isEmpty()
+            ? message.text.toHtmlEscaped()
+            : message.richText;
+        for (const ChatEmojiInfo& emo : message.emojis) {
+            const QString placeholder = QStringLiteral("emoji://%1").arg(emo.emojiId);
+            if (m_emojiCache && m_emojiCache->contains(emo.emojiId)) {
+                const QPixmap pix = m_emojiCache->get(emo.emojiId);
+                QByteArray ba;
+                QBuffer buf(&ba);
+                buf.open(QIODevice::WriteOnly);
+                pix.save(&buf, "PNG");
+                html.replace(placeholder,
+                    QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(ba.toBase64())));
+            } else {
+                if (m_emojiCache) {
+                    m_emojiCache->ensureLoaded(emo.emojiId, emo.imageUrl);
+                }
+                html.replace(
+                    QStringLiteral("<img src='%1' width='24' height='24' alt='%2'/>")
+                        .arg(placeholder, emo.fallbackText.toHtmlEscaped()),
+                    emo.fallbackText.toHtmlEscaped());
+            }
+        }
+        lblMessage->setText(html);
+    }
 
     const QString timestampText = message.timestamp.isValid()
         ? message.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))

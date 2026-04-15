@@ -324,27 +324,57 @@ UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const
     msg.rawAuthorDisplayName = msg.authorName;
     msg.rawAuthorChannelId = msg.authorId;
 
-    // Parse message text from runs[]
+    // Parse message text + richText from runs[]
     const QJsonArray runs = renderer.value(QStringLiteral("message")).toObject()
                                 .value(QStringLiteral("runs")).toArray();
     QString text;
+    QString richText;
+    QVector<ChatEmojiInfo> emojiList;
     for (const QJsonValue& runVal : runs) {
         const QJsonObject run = runVal.toObject();
         if (run.contains(QStringLiteral("text"))) {
-            text += run.value(QStringLiteral("text")).toString();
+            const QString t = run.value(QStringLiteral("text")).toString();
+            text += t;
+            richText += t.toHtmlEscaped();
         } else if (run.contains(QStringLiteral("emoji"))) {
             const QJsonObject emoji = run.value(QStringLiteral("emoji")).toObject();
             const bool isCustom = emoji.value(QStringLiteral("isCustomEmoji")).toBool(false);
             const QString emojiId = emoji.value(QStringLiteral("emojiId")).toString();
             if (!isCustom && !emojiId.isEmpty() && !emojiId.contains(QLatin1Char('/'))) {
                 text += emojiId;
+                richText += emojiId.toHtmlEscaped();
             } else {
+                // Extract image URL from thumbnails
+                QString imageUrl;
+                const QJsonArray thumbnails = emoji.value(QStringLiteral("image"))
+                    .toObject().value(QStringLiteral("thumbnails")).toArray();
+                for (const QJsonValue& t : thumbnails) {
+                    const QJsonObject thumb = t.toObject();
+                    const int w = thumb.value(QStringLiteral("width")).toInt();
+                    if (w >= 24 && w <= 48) {
+                        imageUrl = thumb.value(QStringLiteral("url")).toString();
+                        break;
+                    }
+                }
+                if (imageUrl.isEmpty() && !thumbnails.isEmpty()) {
+                    imageUrl = thumbnails.first().toObject().value(QStringLiteral("url")).toString();
+                }
+
                 const QJsonArray shortcuts = emoji.value(QStringLiteral("shortcuts")).toArray();
                 const QString shortcut = shortcuts.isEmpty() ? QString() : shortcuts.first().toString();
-                if (!shortcut.isEmpty()) {
-                    text += shortcut;
-                } else if (!emojiId.isEmpty()) {
-                    text += emojiId;
+                const QString fallback = shortcut.isEmpty() ? emojiId : shortcut;
+                text += fallback.isEmpty() ? emojiId : fallback;
+
+                if (!imageUrl.isEmpty() && !emojiId.isEmpty()) {
+                    richText += QStringLiteral("<img src='emoji://%1' width='24' height='24' alt='%2'/>")
+                        .arg(emojiId, fallback.toHtmlEscaped());
+                    ChatEmojiInfo info;
+                    info.emojiId = emojiId;
+                    info.imageUrl = imageUrl;
+                    info.fallbackText = fallback;
+                    emojiList.append(info);
+                } else {
+                    richText += fallback.toHtmlEscaped();
                 }
             }
         }
@@ -372,6 +402,8 @@ UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const
     }
 
     msg.text = text.trimmed();
+    msg.richText = richText;
+    msg.emojis = emojiList;
 
     // Parse timestamp from timestampUsec (microseconds string)
     bool tsOk = false;

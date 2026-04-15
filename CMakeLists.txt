@@ -119,6 +119,8 @@ add_executable(BotManagerQt5
     src/platform/youtube/YouTubeAdapter.h
     src/platform/youtube/YouTubeChatMessageParser.cpp
     src/platform/youtube/YouTubeChatMessageParser.h
+    src/platform/youtube/EmojiImageCache.cpp
+    src/platform/youtube/EmojiImageCache.h
     src/platform/youtube/YouTubeLiveChatWebClient.cpp
     src/platform/youtube/YouTubeLiveChatWebClient.h
     src/platform/youtube/YouTubeStreamListClient.cpp

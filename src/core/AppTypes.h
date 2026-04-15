@@ -79,6 +79,12 @@ struct TokenRecord {
     QDateTime updatedAtUtc;
 };
 
+struct ChatEmojiInfo {
+    QString emojiId;
+    QString imageUrl;
+    QString fallbackText;
+};
+
 struct UnifiedChatMessage {
     PlatformId platform = PlatformId::YouTube;
     QString messageId;
@@ -93,6 +99,8 @@ struct UnifiedChatMessage {
     bool authorIsChatSponsor = false;
     bool authorIsVerified = false;
     QString text;
+    QString richText;
+    QVector<ChatEmojiInfo> emojis;
     QDateTime timestamp;
 };
 
@@ -112,6 +120,8 @@ Q_DECLARE_METATYPE(AppSettingsSnapshot)
 Q_DECLARE_METATYPE(PlatformSettings)
 Q_DECLARE_METATYPE(ConnectSessionResult)
 Q_DECLARE_METATYPE(TokenState)
+Q_DECLARE_METATYPE(ChatEmojiInfo)
+Q_DECLARE_METATYPE(QVector<ChatEmojiInfo>)
 Q_DECLARE_METATYPE(UnifiedChatMessage)
 Q_DECLARE_METATYPE(QVector<UnifiedChatMessage>)
 Q_DECLARE_METATYPE(TokenRecord)

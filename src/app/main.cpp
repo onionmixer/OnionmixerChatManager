@@ -23,6 +23,8 @@ int main(int argc, char* argv[])
     qRegisterMetaType<UnifiedChatMessage>("UnifiedChatMessage");
     qRegisterMetaType<QVector<UnifiedChatMessage>>("QVector<UnifiedChatMessage>");
     qRegisterMetaType<TokenRecord>("TokenRecord");
+    qRegisterMetaType<ChatEmojiInfo>("ChatEmojiInfo");
+    qRegisterMetaType<QVector<ChatEmojiInfo>>("QVector<ChatEmojiInfo>");
 
     MainWindow w(configDir);
     w.show();
