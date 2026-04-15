@@ -101,6 +101,13 @@ ChzzkAdapter::ChzzkAdapter(QObject* parent)
         handleConnectFailure(QStringLiteral("CONNECT_TIMEOUT"), QStringLiteral("CHZZK connect timeout"));
     });
 
+    m_heartbeatTimer = new QTimer(this);
+    connect(m_heartbeatTimer, &QTimer::timeout, this, [this]() {
+        if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+            m_socket->sendTextMessage(QStringLiteral("2"));
+        }
+    });
+
     m_socket = new QWebSocket;
     m_socket->setParent(this);
     connect(m_socket, &QWebSocket::connected, this, &ChzzkAdapter::onSocketConnected);
@@ -216,6 +223,9 @@ void ChzzkAdapter::stop()
     m_subscribeRecoverCount = 0;
     resetProgressAnnouncements();
     m_seenMessageIds.clear();
+    if (m_heartbeatTimer) {
+        m_heartbeatTimer->stop();
+    }
     m_socket->abort();
     m_accessToken.clear();
     m_connected = false;
@@ -565,6 +575,9 @@ void ChzzkAdapter::onSocketConnected()
 void ChzzkAdapter::onSocketDisconnected()
 {
     m_seenMessageIds.clear();
+    if (m_heartbeatTimer) {
+        m_heartbeatTimer->stop();
+    }
 
     if (m_stopping) {
         return;
@@ -632,8 +645,15 @@ void ChzzkAdapter::processSocketIoPacket(const QString& packet)
         return;
     }
 
-    // Engine.IO open packet
+    // Engine.IO open packet — parse pingInterval and start heartbeat
     if (packet.startsWith(QLatin1Char('0'))) {
+        const QJsonDocument openDoc = QJsonDocument::fromJson(packet.mid(1).toUtf8());
+        if (openDoc.isObject()) {
+            const int pingInterval = openDoc.object().value(QStringLiteral("pingInterval")).toInt(25000);
+            if (m_heartbeatTimer) {
+                m_heartbeatTimer->start(qMax(pingInterval, 5000));
+            }
+        }
         return;
     }
 

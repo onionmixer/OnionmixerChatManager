@@ -63,6 +63,7 @@ private:
     bool m_announcedSubscribePending = false;
     bool m_announcedChatReady = false;
     QSet<QString> m_seenMessageIds;
+    QTimer* m_heartbeatTimer = nullptr;
 };
 
 #endif // CHZZK_ADAPTER_H
