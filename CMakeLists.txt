@@ -123,6 +123,8 @@ add_executable(BotManagerQt5
     src/utils/JsonHelper.h
     src/platform/youtube/YouTubeAdapter.cpp
     src/platform/youtube/YouTubeAdapter.h
+    src/platform/youtube/YouTubeLiveDiscovery.cpp
+    src/platform/youtube/YouTubeLiveDiscovery.h
     src/platform/youtube/YouTubeChatMessageParser.cpp
     src/platform/youtube/YouTubeChatMessageParser.h
     src/core/EmojiImageCache.cpp
