@@ -9,6 +9,7 @@
 #include "platform/youtube/YouTubeUrlUtils.h"
 #include "i18n/AppLanguage.h"
 #include "ui/ChatBubbleDelegate.h"
+#include "ui/ChatDisplayController.h"
 #include "ui/ChatBubbleWidget.h"
 #include "ui/ChatMessageModel.h"
 #include "ui/ChatterStatsManager.h"
@@ -157,6 +158,15 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     m_chatDelegate = new ChatBubbleDelegate(this);
     m_chatDelegate->setEmojiCache(m_emojiCache);
     setupUi();
+    // ChatDisplayController created after setupUi (needs widget pointers)
+    m_chatController = new ChatDisplayController(m_chatStack, m_chatListView, m_tblChat,
+        m_chatModel, m_chatDelegate, m_emojiCache, &m_snapshot, this);
+    connect(m_chatController, &ChatDisplayController::selectionChanged,
+        this, &MainWindow::updateActionPanel);
+    connect(m_chatController, &ChatDisplayController::logMessage,
+        m_txtEventLog, &QTextEdit::append);
+    connect(m_chatController, &ChatDisplayController::chatMessageAppended,
+        m_chatterStatsManager, &ChatterStatsManager::recordChatter);
 
     m_snapshot = m_settings.load();
     m_detailLogEnabled = m_snapshot.detailLogEnabled;

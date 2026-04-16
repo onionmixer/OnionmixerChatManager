@@ -26,6 +26,7 @@ class QNetworkReply;
 class QPlainTextEdit;
 class QPushButton;
 class ChatBubbleDelegate;
+class ChatDisplayController;
 class ChatMessageModel;
 class ChatterStatsManager;
 class EmojiImageCache;
@@ -180,6 +181,7 @@ private:
     EmojiImageCache* m_emojiCache = nullptr;
     ChatMessageModel* m_chatModel = nullptr;
     ChatBubbleDelegate* m_chatDelegate = nullptr;
+    ChatDisplayController* m_chatController = nullptr;
 
     enum class ChatViewMode {
         Messenger,
