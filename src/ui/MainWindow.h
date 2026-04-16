@@ -16,6 +16,7 @@
 #include <QUrl>
 #include <QVector>
 
+class BroadcastChatWindow;
 class ConfigurationDialog;
 class ChatterListDialog;
 class QEvent;
@@ -145,6 +146,9 @@ private:
     void requestYouTubeViewerCount();
     void updateViewerCount(PlatformId platform, int count);
     void refreshViewerCountDisplay();
+    void onOpenBroadcast();
+    void onBroadcastWindowResized(int width, int height);
+    void onBroadcastWindowMoved(int x, int y);
     void syncYouTubeProfileFromAccessToken(const QString& accessToken);
     void syncChzzkProfileFromAccessToken(const QString& accessToken);
     QMap<PlatformId, bool> currentConnections() const;
@@ -185,6 +189,7 @@ private:
 
     ConfigurationDialog* m_configurationDialog = nullptr;
     ChatterListDialog* m_chatterListDialog = nullptr;
+    BroadcastChatWindow* m_broadcastWindow = nullptr;
     EmojiImageCache* m_emojiCache = nullptr;
     ChatMessageModel* m_chatModel = nullptr;
     ChatBubbleDelegate* m_chatDelegate = nullptr;
@@ -197,6 +202,7 @@ private:
 
     QPushButton* m_btnConnectToggle = nullptr;
     QPushButton* m_btnToggleChatView = nullptr;
+    QPushButton* m_btnOpenBroadcast = nullptr;
     QPushButton* m_btnOpenChatterList = nullptr;
     QPushButton* m_btnOpenConfiguration = nullptr;
     QLabel* m_lblStateCaption = nullptr;

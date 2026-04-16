@@ -8,6 +8,7 @@
 #include "platform/youtube/YouTubeEndpoints.h"
 #include "platform/youtube/YouTubeUrlUtils.h"
 #include "i18n/AppLanguage.h"
+#include "ui/BroadcastChatWindow.h"
 #include "ui/ChatBubbleDelegate.h"
 #include "ui/ChatDisplayController.h"
 #include "ui/ChatBubbleWidget.h"
@@ -29,6 +30,7 @@
 #include <QFormLayout>
 #include <QListView>
 #include <QGuiApplication>
+#include <QScreen>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -260,6 +262,11 @@ void MainWindow::changeEvent(QEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    if (m_broadcastWindow) {
+        m_broadcastWindow->close();
+        delete m_broadcastWindow;
+        m_broadcastWindow = nullptr;
+    }
     QSettings ws(m_configDir + QStringLiteral("/app.ini"), QSettings::IniFormat);
     ws.beginGroup(QStringLiteral("window"));
     ws.setValue(QStringLiteral("geometry"), saveGeometry());
@@ -363,6 +370,9 @@ void MainWindow::onConfigApplyRequested(const AppSettingsSnapshot& snapshot)
         statusBar()->showMessage(message, 5000);
     } else {
         statusBar()->showMessage(tr("Configuration updated. Reconnect to apply running session."), 4000);
+    }
+    if (m_broadcastWindow) {
+        m_broadcastWindow->applySettings(snapshot);
     }
     onLiveProbeTimeout();
 }
@@ -576,6 +586,7 @@ void MainWindow::setupUi()
 
     connect(m_btnConnectToggle, &QPushButton::clicked, this, &MainWindow::onConnectToggleClicked);
     connect(m_btnToggleChatView, &QPushButton::clicked, this, &MainWindow::onToggleChatViewClicked);
+    connect(m_btnOpenBroadcast, &QPushButton::clicked, this, &MainWindow::onOpenBroadcast);
     connect(m_btnOpenChatterList, &QPushButton::clicked, this, &MainWindow::onOpenChatterList);
     connect(m_btnOpenConfiguration, &QPushButton::clicked, this, &MainWindow::onOpenConfiguration);
     retranslateUi();
@@ -589,6 +600,8 @@ QLayout* MainWindow::setupTopBar(QWidget* root)
     m_btnConnectToggle->setObjectName(QStringLiteral("btnConnectToggle"));
     m_btnToggleChatView = new QPushButton(root);
     m_btnToggleChatView->setObjectName(QStringLiteral("btnToggleChatView"));
+    m_btnOpenBroadcast = new QPushButton(root);
+    m_btnOpenBroadcast->setObjectName(QStringLiteral("btnOpenBroadcast"));
     m_lblStateCaption = new QLabel(root);
     m_lblStateCaption->setObjectName(QStringLiteral("lblStateCaption"));
     m_lblConnectionState = new QLabel(root);
@@ -599,8 +612,14 @@ QLayout* MainWindow::setupTopBar(QWidget* root)
     m_btnOpenConfiguration = new QPushButton(root);
     m_btnOpenConfiguration->setObjectName(QStringLiteral("btnOpenConfiguration"));
 
+    const int topBtnHeight = m_btnConnectToggle->sizeHint().height();
+    for (auto* btn : {m_btnConnectToggle, m_btnToggleChatView, m_btnOpenBroadcast, m_btnOpenChatterList, m_btnOpenConfiguration}) {
+        btn->setFixedHeight(topBtnHeight);
+    }
+
     topLayout->addWidget(m_btnConnectToggle);
     topLayout->addWidget(m_btnToggleChatView);
+    topLayout->addWidget(m_btnOpenBroadcast);
     topLayout->addWidget(m_lblStateCaption);
     topLayout->addWidget(m_lblConnectionState);
     topLayout->addStretch();
@@ -843,6 +862,12 @@ void MainWindow::retranslateUi()
     }
     if (m_btnOpenConfiguration) {
         m_btnOpenConfiguration->setText(tr("Configuration"));
+    }
+    if (m_btnOpenBroadcast) {
+        m_btnOpenBroadcast->setText(tr("BroadChat"));
+    }
+    if (m_broadcastWindow) {
+        m_broadcastWindow->setWindowTitle(tr("Broadcast Chat"));
     }
     if (m_grpActionPanel) {
         m_grpActionPanel->setTitle(tr("Actions"));
@@ -2531,5 +2556,54 @@ void MainWindow::refreshViewerCountDisplay()
     if (m_chzzkViewerCount >= 0) { total += m_chzzkViewerCount; hasAny = true; }
     m_lblTotalViewers->setText(QStringLiteral("\u03A3 %1").arg(
         hasAny ? QLocale().toString(total) : QStringLiteral("\u2014")));
+
+    if (m_broadcastWindow) {
+        m_broadcastWindow->updateViewerCount(m_youtubeViewerCount, m_chzzkViewerCount);
+    }
+}
+
+void MainWindow::onOpenBroadcast()
+{
+    if (!m_broadcastWindow) {
+        m_broadcastWindow = new BroadcastChatWindow(m_chatModel, m_emojiCache, nullptr);
+        connect(m_broadcastWindow, &BroadcastChatWindow::windowResized,
+                this, &MainWindow::onBroadcastWindowResized);
+        connect(m_broadcastWindow, &BroadcastChatWindow::windowMoved,
+                this, &MainWindow::onBroadcastWindowMoved);
+        m_broadcastWindow->applySettings(m_snapshot);
+        m_broadcastWindow->updateViewerCount(m_youtubeViewerCount, m_chzzkViewerCount);
+
+        // 저장된 위치 복원 (-1이면 화면 중앙)
+        if (m_snapshot.broadcastWindowX >= 0 && m_snapshot.broadcastWindowY >= 0) {
+            m_broadcastWindow->move(m_snapshot.broadcastWindowX, m_snapshot.broadcastWindowY);
+        } else {
+            const QRect screenRect = QGuiApplication::primaryScreen()->availableGeometry();
+            m_broadcastWindow->move(
+                screenRect.x() + (screenRect.width() - m_broadcastWindow->width()) / 2,
+                screenRect.y() + (screenRect.height() - m_broadcastWindow->height()) / 2);
+        }
+    }
+    m_broadcastWindow->show();
+    m_broadcastWindow->raise();
+    m_broadcastWindow->activateWindow();
+}
+
+void MainWindow::onBroadcastWindowResized(int width, int height)
+{
+    if (m_snapshot.broadcastWindowWidth == width && m_snapshot.broadcastWindowHeight == height) return;
+    m_snapshot.broadcastWindowWidth = width;
+    m_snapshot.broadcastWindowHeight = height;
+    m_settings.save(m_snapshot);
+    if (m_configurationDialog && m_configurationDialog->isVisible()) {
+        m_configurationDialog->setSnapshot(m_snapshot);
+    }
+}
+
+void MainWindow::onBroadcastWindowMoved(int x, int y)
+{
+    if (m_snapshot.broadcastWindowX == x && m_snapshot.broadcastWindowY == y) return;
+    m_snapshot.broadcastWindowX = x;
+    m_snapshot.broadcastWindowY = y;
+    m_settings.save(m_snapshot);
 }
 

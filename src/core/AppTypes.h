@@ -53,6 +53,15 @@ struct AppSettingsSnapshot {
     int chatMaxMessages = 5000;
     PlatformSettings youtube;
     PlatformSettings chzzk;
+
+    QString broadcastViewerCountPosition = QStringLiteral("TopLeft");
+    int broadcastWindowX = -1;
+    int broadcastWindowY = -1;
+    int broadcastWindowWidth = 400;
+    int broadcastWindowHeight = 600;
+    QString broadcastTransparentBgColor = QStringLiteral("#00000000");
+    QString broadcastOpaqueBgColor = QStringLiteral("#FFFFFFFF");
+
     QDateTime loadedAtUtc;
 };
 

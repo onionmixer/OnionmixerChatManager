@@ -151,6 +151,16 @@ AppSettingsSnapshot AppSettings::load() const
         snapshot.chzzk.tokenEndpoint = defaultChzzk().tokenEndpoint;
     }
 
+    s.beginGroup(QStringLiteral("broadcast"));
+    snapshot.broadcastViewerCountPosition = s.value(QStringLiteral("viewer_count_position"), QStringLiteral("TopLeft")).toString();
+    snapshot.broadcastWindowX = s.value(QStringLiteral("window_x"), -1).toInt();
+    snapshot.broadcastWindowY = s.value(QStringLiteral("window_y"), -1).toInt();
+    snapshot.broadcastWindowWidth = s.value(QStringLiteral("window_width"), 400).toInt();
+    snapshot.broadcastWindowHeight = s.value(QStringLiteral("window_height"), 600).toInt();
+    snapshot.broadcastTransparentBgColor = s.value(QStringLiteral("transparent_bg_color"), QStringLiteral("#00000000")).toString();
+    snapshot.broadcastOpaqueBgColor = s.value(QStringLiteral("opaque_bg_color"), QStringLiteral("#FFFFFFFF")).toString();
+    s.endGroup();
+
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();
     return snapshot;
 }
@@ -175,6 +185,16 @@ bool AppSettings::save(const AppSettingsSnapshot& snapshot) const
 
     savePlatform(s, QStringLiteral("youtube"), snapshot.youtube);
     savePlatform(s, QStringLiteral("chzzk"), snapshot.chzzk);
+
+    s.beginGroup(QStringLiteral("broadcast"));
+    s.setValue(QStringLiteral("viewer_count_position"), snapshot.broadcastViewerCountPosition);
+    s.setValue(QStringLiteral("window_x"), snapshot.broadcastWindowX);
+    s.setValue(QStringLiteral("window_y"), snapshot.broadcastWindowY);
+    s.setValue(QStringLiteral("window_width"), snapshot.broadcastWindowWidth);
+    s.setValue(QStringLiteral("window_height"), snapshot.broadcastWindowHeight);
+    s.setValue(QStringLiteral("transparent_bg_color"), snapshot.broadcastTransparentBgColor);
+    s.setValue(QStringLiteral("opaque_bg_color"), snapshot.broadcastOpaqueBgColor);
+    s.endGroup();
 
     s.sync();
     return s.status() == QSettings::NoError;

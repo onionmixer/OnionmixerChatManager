@@ -1,5 +1,6 @@
 #include "ui/ConfigurationDialog.h"
 #include "core/Constants.h"
+#include "core/PlatformTraits.h"
 #include "ui/ChatBubbleDelegate.h"
 #include "ui/ChatMessageModel.h"
 
@@ -9,6 +10,7 @@
 #include <QAbstractItemView>
 #include <QBrush>
 #include <QColor>
+#include <QColorDialog>
 #include <QFontComboBox>
 #include <QFormLayout>
 #include <QFontMetrics>
@@ -25,6 +27,8 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGuiApplication>
+#include <QPainter>
+#include <QResizeEvent>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTextEdit>
@@ -266,6 +270,7 @@ ConfigurationDialog::ConfigurationDialog(QWidget* parent)
     m_tabConfig->addTab(createYouTubeTab(), tr("YouTube"));
     m_tabConfig->addTab(createChzzkTab(), tr("CHZZK"));
     m_tabConfig->addTab(createSecurityTab(), tr("Security"));
+    m_tabConfig->addTab(createBroadcastTab(), tr("BroadChat"));
 
     auto* btnApply = new QPushButton(tr("Apply"), this);
     btnApply->setObjectName(QStringLiteral("btnCfgApply"));
@@ -345,6 +350,15 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
     m_chzEdtChannelName->setText(snapshot.chzzk.channelName);
     m_chzEdtAccountLabel->setText(snapshot.chzzk.accountLabel);
     m_chzLblAccount->setText(snapshot.chzzk.channelId.isEmpty() ? QStringLiteral("-") : snapshot.chzzk.channelId);
+
+    if (m_cmbBroadcastViewerPosition)
+        m_cmbBroadcastViewerPosition->setCurrentText(snapshot.broadcastViewerCountPosition);
+    if (m_spnBroadcastWidth) m_spnBroadcastWidth->setValue(snapshot.broadcastWindowWidth);
+    if (m_spnBroadcastHeight) m_spnBroadcastHeight->setValue(snapshot.broadcastWindowHeight);
+    if (m_btnBroadcastTransparentBg)
+        applyColorButtonStyle(m_btnBroadcastTransparentBg, QColor(snapshot.broadcastTransparentBgColor));
+    if (m_btnBroadcastOpaqueBg)
+        applyColorButtonStyle(m_btnBroadcastOpaqueBg, QColor(snapshot.broadcastOpaqueBgColor));
 }
 
 void ConfigurationDialog::onTokenOperationStarted(PlatformId platform, const QString& operation)
@@ -1084,6 +1098,16 @@ AppSettingsSnapshot ConfigurationDialog::collectSnapshot() const
     snapshot.chatMaxMessages = m_spnChatMaxMessages->value();
     snapshot.youtube = collectPlatformSettings(PlatformId::YouTube);
     snapshot.chzzk = collectPlatformSettings(PlatformId::Chzzk);
+
+    if (m_cmbBroadcastViewerPosition)
+        snapshot.broadcastViewerCountPosition = m_cmbBroadcastViewerPosition->currentText();
+    if (m_spnBroadcastWidth) snapshot.broadcastWindowWidth = m_spnBroadcastWidth->value();
+    if (m_spnBroadcastHeight) snapshot.broadcastWindowHeight = m_spnBroadcastHeight->value();
+    if (m_btnBroadcastTransparentBg)
+        snapshot.broadcastTransparentBgColor = m_btnBroadcastTransparentBg->property("colorValue").toString();
+    if (m_btnBroadcastOpaqueBg)
+        snapshot.broadcastOpaqueBgColor = m_btnBroadcastOpaqueBg->property("colorValue").toString();
+
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();
     return snapshot;
 }
@@ -1155,4 +1179,246 @@ bool ConfigurationDialog::validateSnapshot(const AppSettingsSnapshot& snapshot, 
     }
 
     return true;
+}
+
+void ConfigurationDialog::applyColorButtonStyle(QPushButton* button, const QColor& color)
+{
+    const QString hexArgb = color.name(QColor::HexArgb);
+    button->setStyleSheet(QStringLiteral(
+        "QPushButton { background-color: rgba(%1,%2,%3,%4); border: 1px solid #888; min-width: 80px; min-height: 20px; color: %5; }")
+        .arg(color.red()).arg(color.green()).arg(color.blue()).arg(color.alpha())
+        .arg(color.lightness() > 128 ? QStringLiteral("#000000") : QStringLiteral("#ffffff")));
+    button->setText(hexArgb);
+    button->setProperty("colorValue", hexArgb);
+}
+
+void ConfigurationDialog::pickBroadcastColor(QPushButton* button, const QString& title)
+{
+    const QColor initial(button->property("colorValue").toString());
+    const QColor chosen = QColorDialog::getColor(initial, this, title, QColorDialog::ShowAlphaChannel);
+    if (chosen.isValid()) {
+        applyColorButtonStyle(button, chosen);
+        updateBroadcastPreview();
+    }
+}
+
+QWidget* ConfigurationDialog::createBroadcastTab()
+{
+    auto* page = new QWidget;
+    auto* pageLayout = new QVBoxLayout(page);
+
+    // 상단: 설정 폼 (고정 높이)
+    auto* formLayout = new QFormLayout;
+
+    m_cmbBroadcastViewerPosition = new QComboBox(page);
+    m_cmbBroadcastViewerPosition->addItems({
+        QStringLiteral("TopLeft"), QStringLiteral("TopCenter"), QStringLiteral("TopRight"),
+        QStringLiteral("CenterLeft"), QStringLiteral("CenterRight"),
+        QStringLiteral("BottomLeft"), QStringLiteral("BottomCenter"), QStringLiteral("BottomRight")
+    });
+    formLayout->addRow(tr("Viewer Count Position"), m_cmbBroadcastViewerPosition);
+
+    m_spnBroadcastWidth = new QSpinBox(page);
+    m_spnBroadcastWidth->setRange(100, 1900);
+    m_spnBroadcastWidth->setSuffix(QStringLiteral(" px"));
+    formLayout->addRow(tr("Window Width"), m_spnBroadcastWidth);
+
+    m_spnBroadcastHeight = new QSpinBox(page);
+    m_spnBroadcastHeight->setRange(150, 1000);
+    m_spnBroadcastHeight->setSuffix(QStringLiteral(" px"));
+    formLayout->addRow(tr("Window Height"), m_spnBroadcastHeight);
+
+    m_btnBroadcastTransparentBg = new QPushButton(page);
+    connect(m_btnBroadcastTransparentBg, &QPushButton::clicked, this, [this]() {
+        pickBroadcastColor(m_btnBroadcastTransparentBg, tr("Transparent Mode Background"));
+    });
+    formLayout->addRow(tr("Transparent Background"), m_btnBroadcastTransparentBg);
+
+    m_btnBroadcastOpaqueBg = new QPushButton(page);
+    connect(m_btnBroadcastOpaqueBg, &QPushButton::clicked, this, [this]() {
+        pickBroadcastColor(m_btnBroadcastOpaqueBg, tr("Opaque Mode Background"));
+    });
+    formLayout->addRow(tr("Opaque Background"), m_btnBroadcastOpaqueBg);
+
+    pageLayout->addLayout(formLayout, 0);  // stretch=0: 고정 높이
+
+    // 오프스크린 프리뷰 렌더러 (parent=this, hide)
+    m_broadcastPreviewRenderer = new QWidget(this);
+    m_broadcastPreviewRenderer->hide();
+    m_broadcastPreviewRenderer->setAttribute(Qt::WA_TranslucentBackground, true);
+    m_broadcastPreviewRenderer->setAutoFillBackground(false);
+    m_broadcastPreviewDelegate = new ChatBubbleDelegate(this);
+    m_broadcastPreviewList = new QListView(m_broadcastPreviewRenderer);
+    m_broadcastPreviewList->setModel(m_chatPreviewModel);
+    m_broadcastPreviewList->setItemDelegate(m_broadcastPreviewDelegate);
+    m_broadcastPreviewList->setSelectionMode(QAbstractItemView::NoSelection);
+    m_broadcastPreviewList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_broadcastPreviewList->setUniformItemSizes(false);
+    m_broadcastPreviewList->setFrameShape(QFrame::NoFrame);
+    m_broadcastPreviewList->setStyleSheet(QStringLiteral("background: transparent;"));
+    m_broadcastPreviewList->viewport()->setAutoFillBackground(false);
+    auto* rendererLayout = new QVBoxLayout(m_broadcastPreviewRenderer);
+    rendererLayout->setContentsMargins(0, 0, 0, 0);
+    rendererLayout->addWidget(m_broadcastPreviewList);
+
+    // 하단: 프리뷰 2개 (남는 공간 채움)
+    auto* previewWrap = new QWidget(page);
+    auto* previewLayout = new QHBoxLayout(previewWrap);
+    previewLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_transparentPreviewGroup = new QGroupBox(tr("Transparent Preview"), previewWrap);
+    auto* transparentPreviewLayout = new QVBoxLayout(m_transparentPreviewGroup);
+    m_lblBroadcastPreviewTransparent = new QLabel(m_transparentPreviewGroup);
+    m_lblBroadcastPreviewTransparent->setAlignment(Qt::AlignCenter);
+    m_lblBroadcastPreviewTransparent->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    transparentPreviewLayout->addWidget(m_lblBroadcastPreviewTransparent);
+
+    m_opaquePreviewGroup = new QGroupBox(tr("Opaque Preview"), previewWrap);
+    auto* opaquePreviewLayout = new QVBoxLayout(m_opaquePreviewGroup);
+    m_lblBroadcastPreviewOpaque = new QLabel(m_opaquePreviewGroup);
+    m_lblBroadcastPreviewOpaque->setAlignment(Qt::AlignCenter);
+    m_lblBroadcastPreviewOpaque->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    opaquePreviewLayout->addWidget(m_lblBroadcastPreviewOpaque);
+
+    previewLayout->addWidget(m_transparentPreviewGroup);
+    previewLayout->addWidget(m_opaquePreviewGroup);
+    pageLayout->addWidget(previewWrap, 1);  // stretch=1: 남는 공간 모두 채움
+
+    // 시그널 연결 — BroadChat 탭 설정 변경 시
+    connect(m_spnBroadcastWidth, QOverload<int>::of(&QSpinBox::valueChanged), this, &ConfigurationDialog::updateBroadcastPreview);
+    connect(m_spnBroadcastHeight, QOverload<int>::of(&QSpinBox::valueChanged), this, &ConfigurationDialog::updateBroadcastPreview);
+    connect(m_cmbBroadcastViewerPosition, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ConfigurationDialog::updateBroadcastPreview);
+
+    // General 탭 폰트 설정 변경 시에도 프리뷰 갱신
+    connect(m_fntChat, &QFontComboBox::currentFontChanged, this, &ConfigurationDialog::updateBroadcastPreview);
+    connect(m_spnChatFontSize, QOverload<int>::of(&QSpinBox::valueChanged), this, &ConfigurationDialog::updateBroadcastPreview);
+    connect(m_chkChatFontBold, &QCheckBox::toggled, this, &ConfigurationDialog::updateBroadcastPreview);
+    connect(m_chkChatFontItalic, &QCheckBox::toggled, this, &ConfigurationDialog::updateBroadcastPreview);
+    connect(m_spnChatLineSpacing, QOverload<int>::of(&QSpinBox::valueChanged), this, &ConfigurationDialog::updateBroadcastPreview);
+
+    // 디바운스 타이머 (resizeEvent 대응)
+    m_broadcastPreviewDebounce = new QTimer(this);
+    m_broadcastPreviewDebounce->setSingleShot(true);
+    m_broadcastPreviewDebounce->setInterval(150);
+    connect(m_broadcastPreviewDebounce, &QTimer::timeout, this, &ConfigurationDialog::updateBroadcastPreview);
+
+    // 탭 전환 시 프리뷰 갱신 (방송창 탭이 보일 때 GroupBox가 정상 크기를 가짐)
+    connect(m_tabConfig, &QTabWidget::currentChanged, this, [this]() {
+        m_broadcastPreviewDebounce->start();
+    });
+
+    return page;
+}
+
+void ConfigurationDialog::resizeEvent(QResizeEvent* event)
+{
+    QDialog::resizeEvent(event);
+    if (m_broadcastPreviewDebounce) {
+        m_broadcastPreviewDebounce->start();
+    }
+}
+
+void ConfigurationDialog::showEvent(QShowEvent* event)
+{
+    QDialog::showEvent(event);
+    if (m_broadcastPreviewDebounce) {
+        m_broadcastPreviewDebounce->start();
+    }
+}
+
+void ConfigurationDialog::updateBroadcastPreview()
+{
+    if (!m_broadcastPreviewRenderer || !m_broadcastPreviewDelegate
+        || !m_lblBroadcastPreviewTransparent || !m_lblBroadcastPreviewOpaque) {
+        return;
+    }
+
+    m_broadcastPreviewDelegate->setFontFamily(m_fntChat->currentFont().family());
+    m_broadcastPreviewDelegate->setFontSize(m_spnChatFontSize->value());
+    m_broadcastPreviewDelegate->setFontBold(m_chkChatFontBold->isChecked());
+    m_broadcastPreviewDelegate->setFontItalic(m_chkChatFontItalic->isChecked());
+    m_broadcastPreviewDelegate->setLineSpacing(m_spnChatLineSpacing->value());
+
+    const int w = m_spnBroadcastWidth->value();
+    const int h = m_spnBroadcastHeight->value();
+    m_broadcastPreviewRenderer->resize(w, h);
+    emit m_broadcastPreviewList->model()->layoutChanged();
+
+    // viewer count 오버레이 렌더링 헬퍼
+    const QString viewerText = QStringLiteral("%1 \u2014  %2 \u2014  \u03A3 \u2014")
+        .arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), PlatformTraits::badgeSymbol(PlatformId::Chzzk));
+    const QString position = m_cmbBroadcastViewerPosition->currentText();
+
+    auto drawViewerOverlay = [&](QPainter& painter, int pw, int ph) {
+        QFont overlayFont;
+        overlayFont.setBold(true);
+        overlayFont.setPixelSize(12);
+        painter.setFont(overlayFont);
+        const QFontMetrics fm(overlayFont);
+        const int textW = fm.horizontalAdvance(viewerText) + 16;
+        const int textH = fm.height() + 8;
+        const int margin = 8;
+
+        int ox = margin;
+        if (position.endsWith(QStringLiteral("Right")))       ox = pw - textW - margin;
+        else if (position.endsWith(QStringLiteral("Center"))) ox = (pw - textW) / 2;
+
+        int oy = margin;
+        if (position.startsWith(QStringLiteral("Bottom")))      oy = ph - textH - margin;
+        else if (position.startsWith(QStringLiteral("Center"))) oy = (ph - textH) / 2;
+
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setBrush(QColor(0, 0, 0, 160));
+        painter.setPen(Qt::NoPen);
+        painter.drawRoundedRect(ox, oy, textW, textH, 4, 4);
+        painter.setPen(QColor(255, 255, 255));
+        painter.drawText(QRect(ox, oy, textW, textH), Qt::AlignCenter, viewerText);
+        painter.setRenderHint(QPainter::Antialiasing, false);
+    };
+
+    // GroupBox의 내부 영역을 기준으로 비율 유지 스케일링
+    const QRect groupRect = m_transparentPreviewGroup->contentsRect();
+    const int availW = qMax(groupRect.width() - 8, 50);
+    const int availH = qMax(groupRect.height() - 8, 50);
+
+    // 방송창 비율 유지하면서 가용 영역에 맞는 스케일 크기 계산
+    const qreal scaleW = static_cast<qreal>(availW) / w;
+    const qreal scaleH = static_cast<qreal>(availH) / h;
+    const qreal scale = qMin(scaleW, scaleH);
+    const int scaledW = qMax(static_cast<int>(w * scale), 1);
+    const int scaledH = qMax(static_cast<int>(h * scale), 1);
+
+
+    // 투명 모드 프리뷰
+    {
+        QPixmap pm(w, h);
+        pm.fill(Qt::transparent);
+        QPainter painter(&pm);
+        QPixmap tile(16, 16);
+        tile.fill(QColor(255, 255, 255));
+        {
+            QPainter tp(&tile);
+            tp.fillRect(0, 0, 8, 8, QColor(204, 204, 204));
+            tp.fillRect(8, 8, 8, 8, QColor(204, 204, 204));
+        }
+        painter.drawTiledPixmap(0, 0, w, h, tile);
+        const QColor transparentBg(m_btnBroadcastTransparentBg->property("colorValue").toString());
+        painter.fillRect(0, 0, w, h, transparentBg);
+        painter.end();
+        m_broadcastPreviewRenderer->render(&pm);
+        { QPainter op(&pm); drawViewerOverlay(op, w, h); }
+        m_lblBroadcastPreviewTransparent->setPixmap(
+            pm.scaled(scaledW, scaledH, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+
+    // 불투명 모드 프리뷰
+    {
+        QPixmap pm(w, h);
+        const QColor opaqueBg(m_btnBroadcastOpaqueBg->property("colorValue").toString());
+        pm.fill(opaqueBg.isValid() ? opaqueBg : QColor(255, 255, 255));
+        m_broadcastPreviewRenderer->render(&pm);
+        { QPainter op(&pm); drawViewerOverlay(op, w, h); }
+        m_lblBroadcastPreviewOpaque->setPixmap(
+            pm.scaled(scaledW, scaledH, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
 }

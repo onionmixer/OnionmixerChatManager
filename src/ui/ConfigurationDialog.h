@@ -8,6 +8,7 @@
 class QCheckBox;
 class QComboBox;
 class QFontComboBox;
+class QGroupBox;
 class QLineEdit;
 class QLabel;
 class QPlainTextEdit;
@@ -38,6 +39,10 @@ public slots:
     void onTokenRecordUpdated(PlatformId platform, TokenState state, const TokenRecord& record, const QString& detail);
     void onTokenAuditAppended(PlatformId platform, const QString& action, bool ok, const QString& detail);
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
 private slots:
     void onApplyClicked();
     void onYouTubeTestConfigClicked();
@@ -49,6 +54,10 @@ private:
     QWidget* createYouTubeTab();
     QWidget* createChzzkTab();
     QWidget* createSecurityTab();
+    QWidget* createBroadcastTab();
+    void pickBroadcastColor(QPushButton* button, const QString& title);
+    static void applyColorButtonStyle(QPushButton* button, const QColor& color);
+    void updateBroadcastPreview();
 
     AppSettingsSnapshot collectSnapshot() const;
     PlatformSettings collectPlatformSettings(PlatformId platform) const;
@@ -127,6 +136,20 @@ private:
 
     QHash<PlatformId, bool> m_tokenBusy;
     QHash<PlatformId, QString> m_tokenBusyOperation;
+
+    QComboBox* m_cmbBroadcastViewerPosition = nullptr;
+    QSpinBox* m_spnBroadcastWidth = nullptr;
+    QSpinBox* m_spnBroadcastHeight = nullptr;
+    QPushButton* m_btnBroadcastTransparentBg = nullptr;
+    QPushButton* m_btnBroadcastOpaqueBg = nullptr;
+    QWidget* m_broadcastPreviewRenderer = nullptr;
+    QListView* m_broadcastPreviewList = nullptr;
+    ChatBubbleDelegate* m_broadcastPreviewDelegate = nullptr;
+    QGroupBox* m_transparentPreviewGroup = nullptr;
+    QGroupBox* m_opaquePreviewGroup = nullptr;
+    QLabel* m_lblBroadcastPreviewTransparent = nullptr;
+    QLabel* m_lblBroadcastPreviewOpaque = nullptr;
+    QTimer* m_broadcastPreviewDebounce = nullptr;
 };
 
 #endif // CONFIGURATION_DIALOG_H
