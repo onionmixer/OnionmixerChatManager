@@ -819,7 +819,8 @@ void ConfigurationDialog::updateChatPreview()
         m_chatPreviewModel->appendMessage(m3);
     }
 
-    // Trigger repaint with updated delegate settings
+    // Notify view that row sizes may have changed (font/spacing update)
+    emit m_chatPreviewModel->layoutChanged();
     m_chatPreviewList->viewport()->update();
 }
 

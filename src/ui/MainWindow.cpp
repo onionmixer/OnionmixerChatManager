@@ -1377,7 +1377,10 @@ void MainWindow::rebuildChatTable()
     configureChatTableForCurrentView();
 
     if (m_chatViewMode == ChatViewMode::Messenger) {
-        // Model already holds data — just update delegate fonts via configureChatTableForCurrentView
+        // Model already holds data — notify view that row heights may have changed
+        if (m_chatModel) {
+            emit m_chatModel->layoutChanged();
+        }
         if (m_chatListView) {
             m_chatListView->viewport()->update();
         }
