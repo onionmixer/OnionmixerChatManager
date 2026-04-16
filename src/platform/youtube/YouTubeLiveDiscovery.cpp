@@ -68,7 +68,7 @@ QString apiErrorReason(const QJsonObject& response)
 // ─── Constructor / Lifecycle ───────────────────────────────────────────
 
 YouTubeLiveDiscovery::YouTubeLiveDiscovery(QNetworkAccessManager* network,
-                                            int* requestInFlight,
+                                            bool* requestInFlight,
                                             int* generation,
                                             QObject* parent)
     : QObject(parent)
@@ -144,7 +144,7 @@ int YouTubeLiveDiscovery::setupRequestGuard(QNetworkReply* reply)
         }
         guard->abort();
     });
-    *m_requestInFlight = 1;
+    *m_requestInFlight = true;
     return gen;
 }
 
@@ -246,7 +246,7 @@ void YouTubeLiveDiscovery::requestOwnChannelProfile()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj;
@@ -296,7 +296,7 @@ void YouTubeLiveDiscovery::requestLiveByHandleWeb()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const QUrl finalUrl = reply->url();
         const QString html = QString::fromUtf8(reply->readAll());
         const QString videoId = !YouTubeUrlUtils::extractVideoIdFromUrl(finalUrl).isEmpty()
@@ -321,7 +321,7 @@ void YouTubeLiveDiscovery::requestRecentStreamByHandleWeb()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const QString html = QString::fromUtf8(reply->readAll());
         const QString videoId = YouTubeUrlUtils::extractVideoIdFromHtml(html);
         if (!videoId.isEmpty()) {
@@ -343,7 +343,7 @@ void YouTubeLiveDiscovery::requestLiveByChannelPageWeb()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const QUrl finalUrl = reply->url();
         const QString html = QString::fromUtf8(reply->readAll());
         const QString videoId = !YouTubeUrlUtils::extractVideoIdFromUrl(finalUrl).isEmpty()
@@ -370,7 +370,7 @@ void YouTubeLiveDiscovery::requestLiveByChannelEmbedWeb()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const QUrl finalUrl = reply->url();
         const QString html = QString::fromUtf8(reply->readAll());
         const QString videoId = !YouTubeUrlUtils::extractVideoIdFromUrl(finalUrl).isEmpty()
@@ -397,7 +397,7 @@ void YouTubeLiveDiscovery::requestPublicFeedForLiveChat()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const QByteArray body = reply->readAll();
         QStringList videoIds;
         QXmlStreamReader xml(body);
@@ -439,7 +439,7 @@ void YouTubeLiveDiscovery::requestActiveBroadcast()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj;
@@ -559,7 +559,7 @@ void YouTubeLiveDiscovery::requestLiveByChannelSearch()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj; const QJsonDocument doc = QJsonDocument::fromJson(body);
@@ -609,7 +609,7 @@ void YouTubeLiveDiscovery::requestMineUploadsPlaylistForLiveChat()
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj; const QJsonDocument doc = QJsonDocument::fromJson(body);
@@ -641,7 +641,7 @@ void YouTubeLiveDiscovery::requestPlaylistItemsForLiveChat(const QString& playli
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj; const QJsonDocument doc = QJsonDocument::fromJson(body);
@@ -677,7 +677,7 @@ void YouTubeLiveDiscovery::requestRecentVideoDetailsForLiveChat(const QStringLis
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj; const QJsonDocument doc = QJsonDocument::fromJson(body);
@@ -724,7 +724,7 @@ void YouTubeLiveDiscovery::requestVideoDetailsForLiveChat(const QString& videoId
     const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen, videoId]() {
         if (gen != *m_generation) { reply->deleteLater(); return; }
-        *m_requestInFlight = 0;
+        *m_requestInFlight = false;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         QJsonObject obj; const QJsonDocument doc = QJsonDocument::fromJson(body);

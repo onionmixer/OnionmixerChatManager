@@ -16,7 +16,7 @@ class YouTubeLiveDiscovery : public QObject {
     Q_OBJECT
 public:
     explicit YouTubeLiveDiscovery(QNetworkAccessManager* network,
-                                  int* requestInFlight,
+                                  bool* requestInFlight,
                                   int* generation,
                                   QObject* parent = nullptr);
 
@@ -59,7 +59,7 @@ private:
     void requestVideoDetailsForLiveChat(const QString& videoId);
 
     QNetworkAccessManager* m_network = nullptr;
-    int* m_requestInFlight = nullptr;
+    bool* m_requestInFlight = nullptr;
     int* m_generation = nullptr;
 
     QString m_accessToken;

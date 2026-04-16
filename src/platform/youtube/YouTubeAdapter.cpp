@@ -3,6 +3,7 @@
 #include "platform/youtube/YouTubeChatMessageParser.h"
 #include "platform/youtube/YouTubeEndpoints.h"
 #include "platform/youtube/YouTubeLiveChatWebClient.h"
+#include "platform/youtube/YouTubeLiveDiscovery.h"
 #include "platform/youtube/YouTubeUrlUtils.h"
 #include "platform/youtube/YouTubeStreamListClient.h"
 
@@ -101,6 +102,24 @@ YouTubeAdapter::YouTubeAdapter(QObject* parent)
 {
     m_network = new QNetworkAccessManager(this);
     m_loopTimer = new QTimer(this);
+    m_discovery = new YouTubeLiveDiscovery(m_network, &m_requestInFlight, &m_generation, this);
+    connect(m_discovery, &YouTubeLiveDiscovery::discoveryCompleted, this, [this](const QString& liveChatId, const QString& videoId) {
+        m_liveChatId = liveChatId;
+        if (!videoId.isEmpty()) m_discoveredVideoId = videoId;
+        m_nextPageToken.clear();
+        m_announcedLiveChatPending = false;
+    });
+    connect(m_discovery, &YouTubeLiveDiscovery::connectionReady, this, [this]() {
+        if (m_pendingConnectResult) {
+            m_pendingConnectResult = false;
+            m_connected = true;
+            emit connected(platformId());
+        }
+    });
+    connect(m_discovery, &YouTubeLiveDiscovery::progress, this, [this](const QString& code, const QString& detail) {
+        emit error(platformId(), code, detail);
+    });
+    connect(m_discovery, &YouTubeLiveDiscovery::requestTick, this, &YouTubeAdapter::scheduleNextTick);
     m_webChatClient = new YouTubeLiveChatWebClient(this);
     m_streamListClient = new YouTubeStreamListClient(this);
     m_loopTimer->setSingleShot(true);
@@ -165,6 +184,7 @@ void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
     }
 
     m_accessToken = trimmed;
+    m_discovery->updateAccessToken(trimmed);
     emit error(platformId(), QStringLiteral("INFO_RUNTIME_TOKEN_UPDATED"),
         trimmed.isEmpty()
             ? QStringLiteral("YouTube runtime access token cleared.")
@@ -664,6 +684,8 @@ void YouTubeAdapter::start(const PlatformSettings& settings)
     m_lastLiveStateCode.clear();
     m_lastLiveStateDetail.clear();
     m_discoveredVideoId.clear();
+    m_discovery->start(m_channelId, m_channelHandle, m_configuredChannelId, m_configuredChannelHandle,
+                       m_manualVideoIdOverride, m_accessToken);
     m_lastPublishedTimestampUtc = QDateTime();
     m_webChatFailureCount = 0;
     m_webChatFallbackUntilUtc = QDateTime();
@@ -690,6 +712,7 @@ void YouTubeAdapter::stop()
     }
 
     ++m_generation;
+    m_discovery->stop();
     m_running = false;
     m_pendingConnectResult = false;
     m_requestInFlight = false;
@@ -753,28 +776,7 @@ void YouTubeAdapter::onLoopTick()
     }
 
     if (m_liveChatId.isEmpty()) {
-        if (!m_manualVideoIdOverride.isEmpty()) {
-            setLiveStateChecking(QStringLiteral("Checking YouTube live state via manual video override."));
-            requestVideoDetailsForLiveChat(m_manualVideoIdOverride);
-            return;
-        }
-        if (m_channelHandle.isEmpty() && m_channelId.isEmpty()) {
-            setLiveStateChecking(QStringLiteral("Resolving YouTube channel handle."));
-            requestOwnChannelProfile();
-            return;
-        }
-        if (!m_channelHandle.isEmpty()) {
-            const bool webCoolingDown = m_nextWebFallbackAllowedAtUtc.isValid()
-                && QDateTime::currentDateTimeUtc() < m_nextWebFallbackAllowedAtUtc;
-            if (!webCoolingDown) {
-                m_nextWebFallbackAllowedAtUtc = QDateTime::currentDateTimeUtc().addSecs(180);
-                setLiveStateChecking(QStringLiteral("Checking YouTube live state via handle URL."));
-                requestLiveByHandleWeb();
-                return;
-            }
-        }
-        setLiveStateChecking(QStringLiteral("Checking YouTube live state."));
-        requestActiveBroadcast();
+        m_discovery->tick();
         return;
     }
     if (shouldUseWebChatTransport()) {

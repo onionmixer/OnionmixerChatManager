@@ -12,6 +12,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
 class YouTubeLiveChatWebClient;
+class YouTubeLiveDiscovery;
 class YouTubeStreamListClient;
 
 class YouTubeAdapter : public IChatPlatformAdapter {
@@ -106,6 +107,7 @@ private:
     QDateTime m_nextSearchFallbackAllowedAtUtc;
     QString m_lastLiveStateCode;
     QString m_lastLiveStateDetail;
+    YouTubeLiveDiscovery* m_discovery = nullptr;
     YouTubeLiveChatWebClient* m_webChatClient = nullptr;
     QString m_discoveredVideoId;
     int m_webChatFailureCount = 0;
