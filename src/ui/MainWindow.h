@@ -25,6 +25,8 @@ class QLabel;
 class QNetworkReply;
 class QPlainTextEdit;
 class QPushButton;
+class ChatBubbleDelegate;
+class ChatMessageModel;
 class EmojiImageCache;
 class QSplitter;
 class QTableWidget;
@@ -175,6 +177,8 @@ private:
     ConfigurationDialog* m_configurationDialog = nullptr;
     ChatterListDialog* m_chatterListDialog = nullptr;
     EmojiImageCache* m_emojiCache = nullptr;
+    ChatMessageModel* m_chatModel = nullptr;
+    ChatBubbleDelegate* m_chatDelegate = nullptr;
 
     enum class ChatViewMode {
         Messenger,

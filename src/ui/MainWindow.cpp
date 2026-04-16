@@ -8,7 +8,9 @@
 #include "platform/youtube/YouTubeEndpoints.h"
 #include "platform/youtube/YouTubeUrlUtils.h"
 #include "i18n/AppLanguage.h"
+#include "ui/ChatBubbleDelegate.h"
 #include "ui/ChatBubbleWidget.h"
+#include "ui/ChatMessageModel.h"
 #include "ui/ConfigurationDialog.h"
 
 #include <algorithm>
@@ -147,6 +149,9 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     , m_chzzkAdapter(this)
 {
     m_emojiCache = new EmojiImageCache(&m_networkAccessManager, this);
+    m_chatModel = new ChatMessageModel(this);
+    m_chatDelegate = new ChatBubbleDelegate(this);
+    m_chatDelegate->setEmojiCache(m_emojiCache);
     setupUi();
 
     m_snapshot = m_settings.load();
@@ -1224,11 +1229,13 @@ void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QStr
     }
 
     m_chatMessages.push_back(message);
+    m_chatModel->appendMessage(message);
 
     const int maxMessages = m_snapshot.chatMaxMessages;
     if (maxMessages > 0 && m_chatMessages.size() > maxMessages) {
         const int keepCount = maxMessages * 4 / 5;
         m_chatMessages = m_chatMessages.mid(m_chatMessages.size() - keepCount);
+        m_chatModel->trimOldest(keepCount);
         rebuildChatTable();
         m_tblChat->scrollToBottom();
         updateActionPanel();
