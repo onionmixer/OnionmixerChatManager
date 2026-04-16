@@ -97,6 +97,8 @@ add_executable(BotManagerQt5
     src/ui/MainWindow.h
     src/ui/ChatterListDialog.cpp
     src/ui/ChatterListDialog.h
+    src/ui/ChatBubbleDelegate.cpp
+    src/ui/ChatBubbleDelegate.h
     src/ui/ChatBubbleWidget.cpp
     src/ui/ChatBubbleWidget.h
     src/ui/ChatMessageModel.cpp
