@@ -3,10 +3,8 @@
 
 #include "core/AppTypes.h"
 
-#include <QHash>
 #include <QObject>
 #include <QSet>
-#include <QStringList>
 #include <QVector>
 
 class ChatBubbleDelegate;
@@ -15,7 +13,6 @@ class EmojiImageCache;
 class QListView;
 class QStackedWidget;
 class QTableWidget;
-class QTimer;
 
 class ChatDisplayController : public QObject {
     Q_OBJECT
@@ -29,16 +26,13 @@ public:
                                     const AppSettingsSnapshot* snapshot,
                                     QObject* parent = nullptr);
 
-    void onChatReceived(const UnifiedChatMessage& message);
-    void toggleViewMode();
+    void appendMessage(const UnifiedChatMessage& message, const QString& authorLabel);
     void configureChatTableForCurrentView();
     void rebuildChatTable();
+    void toggleViewMode();
     int selectedChatRow() const;
     const UnifiedChatMessage* selectedChatMessage() const;
     void copySelectedChat();
-
-    QString displayAuthorLabel(const UnifiedChatMessage& message) const;
-    void setYouTubeAuthorHandleCache(const QString& authorId, const QString& handle);
 
     enum class ChatViewMode { Messenger, Table };
     ChatViewMode viewMode() const { return m_chatViewMode; }
@@ -46,16 +40,9 @@ public:
 
 signals:
     void selectionChanged();
-    void logMessage(const QString& text);
-    void chatMessageAppended(const UnifiedChatMessage& message, const QString& authorLabel);
 
 private:
-    void appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel);
-    void appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel = QString());
-    QWidget* buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const;
-    QString messengerAuthorLabel(const UnifiedChatMessage& message) const;
-
-    void maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message);
+    void appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel);
 
     QStackedWidget* m_chatStack = nullptr;
     QListView* m_chatListView = nullptr;
@@ -68,11 +55,6 @@ private:
     ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
     QVector<UnifiedChatMessage> m_chatMessages;
     QSet<QString> m_recentMessageIds;
-
-    QHash<QString, QString> m_youtubeAuthorHandleCache;
-    QSet<QString> m_youtubeAuthorHandlePending;
-    QStringList m_youtubeAuthorHandleLookupQueue;
-    bool m_detailLogEnabled = false;
 };
 
 #endif // CHAT_DISPLAY_CONTROLLER_H

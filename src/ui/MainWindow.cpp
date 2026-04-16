@@ -163,10 +163,6 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
         m_chatModel, m_chatDelegate, m_emojiCache, &m_snapshot, this);
     connect(m_chatController, &ChatDisplayController::selectionChanged,
         this, &MainWindow::updateActionPanel);
-    connect(m_chatController, &ChatDisplayController::logMessage,
-        m_txtEventLog, &QTextEdit::append);
-    connect(m_chatController, &ChatDisplayController::chatMessageAppended,
-        m_chatterStatsManager, &ChatterStatsManager::recordChatter);
 
     m_snapshot = m_settings.load();
     m_detailLogEnabled = m_snapshot.detailLogEnabled;
@@ -1215,13 +1211,8 @@ void MainWindow::onChatReceived(const UnifiedChatMessage& message)
     const QString authorLabel = displayAuthorLabel(message);
     maybeQueueYouTubeAuthorHandleLookup(message);
 
-    const QString msgId = message.messageId.trimmed();
-    if (!msgId.isEmpty() && m_recentMessageIds.contains(msgId)) {
-        return;
-    }
-
     m_chatterStatsManager->recordChatter(message, authorLabel);
-    appendChatMessage(message, authorLabel);
+    m_chatController->appendMessage(message, authorLabel);
     m_txtEventLog->append(QStringLiteral("[CHAT] %1 author=%2 text=%3")
                               .arg(platformKey(message.platform),
                                   authorLabel,
@@ -1750,23 +1741,12 @@ void MainWindow::setActionButtonState(QPushButton* button, bool enabled, const Q
 
 const UnifiedChatMessage* MainWindow::selectedChatMessage() const
 {
-    const int row = selectedChatRow();
-    if (row < 0 || row >= m_chatMessages.size()) {
-        return nullptr;
-    }
-    return &m_chatMessages.at(row);
+    return m_chatController ? m_chatController->selectedChatMessage() : nullptr;
 }
 
 int MainWindow::selectedChatRow() const
 {
-    if (m_chatViewMode == ChatViewMode::Messenger) {
-        if (!m_chatListView || !m_chatListView->selectionModel()) return -1;
-        const QModelIndexList sel = m_chatListView->selectionModel()->selectedIndexes();
-        return sel.isEmpty() ? -1 : sel.first().row();
-    }
-    if (!m_tblChat || !m_tblChat->selectionModel()) return -1;
-    const QModelIndexList rows = m_tblChat->selectionModel()->selectedRows();
-    return rows.isEmpty() ? -1 : rows.first().row();
+    return m_chatController ? m_chatController->selectedChatRow() : -1;
 }
 
 void MainWindow::executeAction(const QString& actionId)

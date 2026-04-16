@@ -2,20 +2,16 @@
 #include "core/Constants.h"
 #include "core/EmojiImageCache.h"
 #include "core/PlatformTraits.h"
-#include "platform/youtube/YouTubeUrlUtils.h"
 #include "ui/ChatBubbleDelegate.h"
-#include "ui/ChatBubbleWidget.h"
 #include "ui/ChatMessageModel.h"
 
 #include <QAbstractItemView>
-#include <QBuffer>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QHeaderView>
 #include <QListView>
 #include <QSignalBlocker>
 #include <QStackedWidget>
-#include <QStatusBar>
 #include <QTableWidget>
 
 ChatDisplayController::ChatDisplayController(QStackedWidget* chatStack,
@@ -37,34 +33,7 @@ ChatDisplayController::ChatDisplayController(QStackedWidget* chatStack,
 {
 }
 
-void ChatDisplayController::onChatReceived(const UnifiedChatMessage& message)
-{
-    const QString authorLabel = displayAuthorLabel(message);
-    maybeQueueYouTubeAuthorHandleLookup(message);
-
-    const QString msgId = message.messageId.trimmed();
-    if (!msgId.isEmpty() && m_recentMessageIds.contains(msgId)) {
-        return;
-    }
-
-    emit chatMessageAppended(message, authorLabel);
-    appendChatMessage(message, authorLabel);
-
-    emit logMessage(QStringLiteral("[CHAT] %1 author=%2 text=%3")
-                        .arg(platformKey(message.platform), authorLabel, message.text.left(120)));
-    if (m_detailLogEnabled && message.platform == PlatformId::YouTube) {
-        emit logMessage(QStringLiteral("[CHAT-TRACE] youtube rawDisplayName=%1 rawChannelId=%2 authorId=%3 owner=%4 moderator=%5 sponsor=%6 verified=%7")
-                            .arg(message.rawAuthorDisplayName.isEmpty() ? QStringLiteral("-") : message.rawAuthorDisplayName,
-                                message.rawAuthorChannelId.isEmpty() ? QStringLiteral("-") : message.rawAuthorChannelId,
-                                message.authorId.isEmpty() ? QStringLiteral("-") : message.authorId,
-                                message.authorIsChatOwner ? QStringLiteral("true") : QStringLiteral("false"),
-                                message.authorIsChatModerator ? QStringLiteral("true") : QStringLiteral("false"),
-                                message.authorIsChatSponsor ? QStringLiteral("true") : QStringLiteral("false"),
-                                message.authorIsVerified ? QStringLiteral("true") : QStringLiteral("false")));
-    }
-}
-
-void ChatDisplayController::appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel)
+void ChatDisplayController::appendMessage(const UnifiedChatMessage& message, const QString& authorLabel)
 {
     const QString msgId = message.messageId.trimmed();
     if (!msgId.isEmpty()) {
@@ -104,9 +73,7 @@ void ChatDisplayController::appendChatMessage(const UnifiedChatMessage& message,
 
 void ChatDisplayController::configureChatTableForCurrentView()
 {
-    if (!m_chatStack) {
-        return;
-    }
+    if (!m_chatStack) return;
 
     if (m_chatViewMode == ChatViewMode::Messenger) {
         m_chatStack->setCurrentWidget(m_chatListView);
@@ -140,12 +107,8 @@ void ChatDisplayController::rebuildChatTable()
     configureChatTableForCurrentView();
 
     if (m_chatViewMode == ChatViewMode::Messenger) {
-        if (m_chatModel) {
-            emit m_chatModel->layoutChanged();
-        }
-        if (m_chatListView) {
-            m_chatListView->viewport()->update();
-        }
+        if (m_chatModel) emit m_chatModel->layoutChanged();
+        if (m_chatListView) m_chatListView->viewport()->update();
         emit selectionChanged();
         return;
     }
@@ -156,7 +119,7 @@ void ChatDisplayController::rebuildChatTable()
     m_tblChat->setRowCount(0);
     for (int i = 0; i < m_chatMessages.size(); ++i) {
         m_tblChat->insertRow(i);
-        appendChatRow(i, m_chatMessages.at(i));
+        appendChatRow(i, m_chatMessages.at(i), QString());
     }
     if (previousRow >= 0 && previousRow < m_tblChat->rowCount()) {
         m_tblChat->selectRow(previousRow);
@@ -164,27 +127,25 @@ void ChatDisplayController::rebuildChatTable()
     emit selectionChanged();
 }
 
+void ChatDisplayController::toggleViewMode()
+{
+    m_chatViewMode = (m_chatViewMode == ChatViewMode::Messenger)
+        ? ChatViewMode::Table : ChatViewMode::Messenger;
+    rebuildChatTable();
+}
+
 void ChatDisplayController::appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel)
 {
+    if (m_chatViewMode != ChatViewMode::Table || !m_tblChat) return;
     const QString platform = message.platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK");
     const QString timeText = message.timestamp.isValid()
         ? message.timestamp.toString(QStringLiteral("HH:mm:ss")) : QStringLiteral("-");
-    const QString authorDisplay = authorLabel.isEmpty() ? messengerAuthorLabel(message) : authorLabel;
-
-    if (m_chatViewMode == ChatViewMode::Messenger) {
-        return; // Messenger mode uses model + delegate
-    }
+    const QString authorDisplay = authorLabel.isEmpty() ? message.authorName : authorLabel;
 
     m_tblChat->setItem(row, 0, new QTableWidgetItem(timeText));
     m_tblChat->setItem(row, 1, new QTableWidgetItem(platform));
     m_tblChat->setItem(row, 2, new QTableWidgetItem(authorDisplay));
     m_tblChat->setItem(row, 3, new QTableWidgetItem(message.text));
-}
-
-QWidget* ChatDisplayController::buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const
-{
-    // Legacy — kept for Table mode fallback if needed
-    return nullptr;
 }
 
 int ChatDisplayController::selectedChatRow() const
@@ -218,7 +179,6 @@ void ChatDisplayController::copySelectedChat()
         copyText = idx.data(ChatMessageModel::CopyTextRole).toString();
     } else {
         QStringList cells;
-        cells.reserve(m_tblChat->columnCount());
         for (int col = 0; col < m_tblChat->columnCount(); ++col) {
             const QTableWidgetItem* item = m_tblChat->item(row, col);
             QString value = item ? item->text() : QString();
@@ -228,62 +188,4 @@ void ChatDisplayController::copySelectedChat()
         copyText = cells.join(QStringLiteral("\t"));
     }
     QGuiApplication::clipboard()->setText(copyText);
-}
-
-void ChatDisplayController::toggleViewMode()
-{
-    m_chatViewMode = (m_chatViewMode == ChatViewMode::Messenger)
-        ? ChatViewMode::Table : ChatViewMode::Messenger;
-    rebuildChatTable();
-}
-
-QString ChatDisplayController::displayAuthorLabel(const UnifiedChatMessage& message) const
-{
-    if (message.platform == PlatformId::YouTube) {
-        if (m_snapshot) {
-            const QString selfHandle = YouTubeUrlUtils::normalizeHandle(m_snapshot->youtube.accountLabel);
-            if (!selfHandle.isEmpty() && !m_snapshot->youtube.channelId.trimmed().isEmpty()
-                && message.authorId.trimmed() == m_snapshot->youtube.channelId.trimmed()) {
-                return selfHandle;
-            }
-        }
-        const QString authorId = message.authorId.trimmed();
-        if (!authorId.isEmpty()) {
-            const QString cachedHandle = YouTubeUrlUtils::normalizeHandle(m_youtubeAuthorHandleCache.value(authorId));
-            if (!cachedHandle.isEmpty()) return cachedHandle;
-        }
-        const QString rawHandle = YouTubeUrlUtils::normalizeHandle(message.rawAuthorDisplayName);
-        if (!rawHandle.isEmpty()) return rawHandle;
-        const QString normalizedName = YouTubeUrlUtils::normalizeHandle(message.authorName);
-        if (!normalizedName.isEmpty()) return normalizedName;
-    }
-    const QString authorName = message.authorName.trimmed();
-    if (!authorName.isEmpty()) return authorName;
-    const QString authorId = message.authorId.trimmed();
-    if (!authorId.isEmpty()) return authorId;
-    return QStringLiteral("-");
-}
-
-QString ChatDisplayController::messengerAuthorLabel(const UnifiedChatMessage& message) const
-{
-    return displayAuthorLabel(message);
-}
-
-void ChatDisplayController::setYouTubeAuthorHandleCache(const QString& authorId, const QString& handle)
-{
-    if (!authorId.isEmpty() && !handle.isEmpty()) {
-        m_youtubeAuthorHandleCache.insert(authorId, handle);
-    }
-}
-
-void ChatDisplayController::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message)
-{
-    if (message.platform != PlatformId::YouTube) return;
-    const QString authorId = message.authorId.trimmed();
-    if (authorId.isEmpty()) return;
-    if (m_youtubeAuthorHandleCache.contains(authorId)) return;
-    if (m_youtubeAuthorHandlePending.contains(authorId)) return;
-    if (m_youtubeAuthorHandleLookupQueue.size() >= BotManager::Limits::kAuthorLookupQueueMax) return;
-    m_youtubeAuthorHandlePending.insert(authorId);
-    m_youtubeAuthorHandleLookupQueue.append(authorId);
 }
