@@ -27,6 +27,7 @@ class QPlainTextEdit;
 class QPushButton;
 class ChatBubbleDelegate;
 class ChatMessageModel;
+class ChatterStatsManager;
 class EmojiImageCache;
 class QListView;
 class QSplitter;
@@ -101,8 +102,6 @@ private:
     void maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message);
     void flushYouTubeAuthorHandleLookupQueue();
     QWidget* buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const;
-    void recordChatter(const UnifiedChatMessage& message, const QString& authorLabel = QString());
-    void rebuildChatterStatsFromMessages();
     void refreshChatterListDialog();
     void updateActionPanel();
     void updateComposerUiState();
@@ -223,7 +222,7 @@ private:
     QTextEdit* m_txtEventLog = nullptr;
 
     QVector<UnifiedChatMessage> m_chatMessages;
-    QHash<QString, ChatterListEntry> m_chatterStats;
+    ChatterStatsManager* m_chatterStatsManager = nullptr;
     QHash<PlatformId, QString> m_platformStatusCodes;
     QHash<QString, QString> m_youtubeAuthorHandleCache;
     QSet<QString> m_youtubeAuthorHandlePending;
@@ -235,7 +234,6 @@ private:
     bool m_composerApplyingHistory = false;
     ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
     bool m_detailLogEnabled = false;
-    bool m_chatterRefreshPending = false;
     QSet<QString> m_recentMessageIds;
 };
 
