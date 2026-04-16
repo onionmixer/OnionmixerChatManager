@@ -1,5 +1,6 @@
 #include "platform/youtube/YouTubeLiveChatWebClient.h"
 #include "platform/youtube/YouTubeChatMessageParser.h"
+#include "platform/youtube/YouTubeEndpoints.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -91,7 +92,7 @@ void YouTubeLiveChatWebClient::fetchInitialPage()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/live_chat"));
+    QUrl url(YouTube::Web::liveChatPage());
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("v"), m_videoId);
     query.addQueryItem(QStringLiteral("is_popout"), QStringLiteral("1"));
@@ -210,7 +211,7 @@ void YouTubeLiveChatWebClient::pollContinuation()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat"));
+    QUrl url(YouTube::Web::innerTubeGetLiveChat());
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("key"), m_innertubeApiKey);
     query.addQueryItem(QStringLiteral("prettyPrint"), QStringLiteral("false"));

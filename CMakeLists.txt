@@ -117,6 +117,8 @@ add_executable(BotManagerQt5
     src/core/IChatPlatformAdapter.h
     src/core/ConnectionCoordinator.cpp
     src/core/ConnectionCoordinator.h
+    src/utils/JsonHelper.cpp
+    src/utils/JsonHelper.h
     src/platform/youtube/YouTubeAdapter.cpp
     src/platform/youtube/YouTubeAdapter.h
     src/platform/youtube/YouTubeChatMessageParser.cpp
@@ -125,6 +127,8 @@ add_executable(BotManagerQt5
     src/core/EmojiImageCache.h
     src/platform/youtube/YouTubeLiveChatWebClient.cpp
     src/platform/youtube/YouTubeLiveChatWebClient.h
+    src/platform/youtube/YouTubeUrlUtils.cpp
+    src/platform/youtube/YouTubeUrlUtils.h
     src/platform/youtube/YouTubeStreamListClient.cpp
     src/platform/youtube/YouTubeStreamListClient.h
     src/platform/chzzk/ChzzkAdapter.cpp
@@ -179,4 +183,20 @@ endif()
 
 if (TARGET botmanager_translations)
     add_dependencies(BotManagerQt5 botmanager_translations)
+endif()
+
+# --- Unit Tests ---
+find_package(Qt5 COMPONENTS Test QUIET)
+if (Qt5Test_FOUND)
+    enable_testing()
+
+    add_executable(test_YouTubeUrlUtils
+        tests/test_YouTubeUrlUtils.cpp
+        src/platform/youtube/YouTubeUrlUtils.cpp
+        src/platform/youtube/YouTubeUrlUtils.h
+    )
+    target_include_directories(test_YouTubeUrlUtils PRIVATE src)
+    target_link_libraries(test_YouTubeUrlUtils PRIVATE Qt5::Core Qt5::Network Qt5::Test)
+    set_target_properties(test_YouTubeUrlUtils PROPERTIES AUTOMOC ON)
+    add_test(NAME YouTubeUrlUtils COMMAND test_YouTubeUrlUtils)
 endif()

@@ -82,8 +82,14 @@ private slots:
 
 private:
     void setupUi();
+    QLayout* setupTopBar(QWidget* root);
+    QLayout* setupStatusBar(QWidget* root);
+    void setupChatTable(QWidget* root);
+    void setupActionPanel(QWidget* root);
+    QWidget* setupComposer(QWidget* root);
     void retranslateUi();
     void recreateAuxiliaryDialogs(bool reopenConfiguration, bool reopenChatterList);
+    void connectConfigurationDialogSignals();
     void refreshConnectButton();
     void refreshChatViewToggleButton();
     void configureChatTableForCurrentView();
@@ -112,8 +118,7 @@ private:
     const UnifiedChatMessage* selectedChatMessage() const;
     void executeAction(const QString& actionId);
     void sendComposedMessage();
-    bool dispatchSendToYouTube(const QString& text);
-    bool dispatchSendToChzzk(const QString& text);
+    void onMessageSent(PlatformId platform, bool ok, const QString& detail);
     void pushComposerHistory(const QString& text);
     void applyComposerHistoryText(const QString& text);
     void refreshTokenUi(PlatformId platform);
@@ -192,10 +197,10 @@ private:
     QTimer* m_liveProbeTimer = nullptr;
     QTimer* m_apiStatusReconcileTimer = nullptr;
     QDateTime m_nextPeriodicChzzkProbeAtUtc;
-    bool m_pendingChzzkLiveProbe = false;
-    bool m_pendingYouTubeProfileSync = false;
-    bool m_pendingChzzkProfileSync = false;
-    bool m_pendingYouTubeAuthorLookup = false;
+    bool m_awaitingChzzkLiveProbe = false;
+    bool m_awaitingYouTubeProfileSync = false;
+    bool m_awaitingChzzkProfileSync = false;
+    bool m_awaitingYouTubeAuthorLookup = false;
 
     ConnectionCoordinator m_connectionCoordinator;
     YouTubeAdapter m_youtubeAdapter;

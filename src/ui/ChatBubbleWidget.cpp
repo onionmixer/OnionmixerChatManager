@@ -17,20 +17,14 @@ QWidget* buildChatBubble(const ChatBubbleParams& p, QWidget* parent)
     layout->setSpacing(1);
     layout->setAlignment(Qt::AlignTop);
 
-    // Badge
+    // Badge (margin-top:1px replaces former badgeWrap QWidget)
     auto* badge = new QLabel(wrap);
     badge->setFixedSize(p.badgeSize, p.badgeSize);
     badge->setAlignment(Qt::AlignCenter);
     badge->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     badge->setFocusPolicy(Qt::NoFocus);
-    badge->setStyleSheet(p.badgeStyle);
+    badge->setStyleSheet(p.badgeStyle + QStringLiteral(" margin-top:1px;"));
     badge->setText(p.badgeText);
-
-    auto* badgeWrap = new QWidget(wrap);
-    auto* badgeWrapLayout = new QVBoxLayout(badgeWrap);
-    badgeWrapLayout->setContentsMargins(0, 1, 0, 0);
-    badgeWrapLayout->setSpacing(0);
-    badgeWrapLayout->addWidget(badge, 0, Qt::AlignTop);
 
     // Author
     auto* lblAuthor = new QLabel(p.authorText, wrap);
@@ -50,7 +44,7 @@ QWidget* buildChatBubble(const ChatBubbleParams& p, QWidget* parent)
     auto* headLayout = new QHBoxLayout;
     headLayout->setContentsMargins(0, 0, 0, 0);
     headLayout->setSpacing(8);
-    headLayout->addWidget(badgeWrap, 0, Qt::AlignVCenter);
+    headLayout->addWidget(badge, 0, Qt::AlignVCenter);
     headLayout->addWidget(lblAuthor, 0, Qt::AlignVCenter);
     headLayout->addWidget(lblTimestamp, 0, Qt::AlignVCenter);
     headLayout->addStretch();

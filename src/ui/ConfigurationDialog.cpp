@@ -1,4 +1,6 @@
 #include "ui/ConfigurationDialog.h"
+#include "core/Constants.h"
+#include "core/PlatformTraits.h"
 #include "ui/ChatBubbleWidget.h"
 
 #include <QCheckBox>
@@ -589,7 +591,7 @@ void ConfigurationDialog::onApplyClicked()
     }
 
     emit configApplyRequested(snapshot);
-        m_statusBar->showMessage(tr("Configuration applied."), 3000);
+        m_statusBar->showMessage(tr("Configuration applied."), BotManager::Timings::kStatusBarDisplayMs);
 }
 
 void ConfigurationDialog::onYouTubeTestConfigClicked()
@@ -828,17 +830,15 @@ void ConfigurationDialog::updateChatPreview()
     containerLayout->setSpacing(0);
 
     for (const auto& msg : samples) {
+        const PlatformId plat = msg.isYouTube ? PlatformId::YouTube : PlatformId::Chzzk;
         ChatBubbleParams params;
-        params.badgeText = msg.isYouTube ? QStringLiteral("\u25B6") : QStringLiteral("Z");
-        params.badgeStyle = msg.isYouTube
-            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
-                  .arg(badgeSize / 2).arg(badgeFontSize)
-            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
-                  .arg(badgeSize / 2).arg(badgeFontSize);
+        params.badgeText = PlatformTraits::badgeSymbol(plat);
+        params.badgeStyle = QStringLiteral("background:%1; color:%2; border-radius:%3px; font-weight:700; font-size:%4px;")
+                                .arg(PlatformTraits::badgeBgColor(plat), PlatformTraits::badgeFgColor(plat))
+                                .arg(badgeSize / 2).arg(badgeFontSize);
         params.authorText = msg.author.toHtmlEscaped();
-        params.authorStyle = msg.isYouTube
-            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
-            : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle);
+        params.authorStyle = QStringLiteral("color:%1; font-weight:700; font-size:%2px;%3")
+                                 .arg(PlatformTraits::authorColor(plat)).arg(fontSize).arg(fontExtraStyle);
         params.messageHtml = msg.text.toHtmlEscaped();
         params.messageStyle = QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2")
                                   .arg(fontSize).arg(fontExtraStyle);

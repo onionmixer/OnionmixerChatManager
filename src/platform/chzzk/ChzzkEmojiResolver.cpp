@@ -1,4 +1,5 @@
 #include "platform/chzzk/ChzzkEmojiResolver.h"
+#include "platform/chzzk/ChzzkEndpoints.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -21,8 +22,7 @@ void ChzzkEmojiResolver::loadEmojiPacks(const QString& channelId)
     }
     m_loading = true;
 
-    const QUrl url(QStringLiteral("https://api.chzzk.naver.com/service/v1/channels/%1/emoji-packs")
-                       .arg(channelId.trimmed()));
+    const QUrl url(Chzzk::ServiceApi::emojiPacks(channelId.trimmed()));
     QNetworkRequest req(url);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 

@@ -1,6 +1,9 @@
 #include "platform/youtube/YouTubeAdapter.h"
+#include "core/Constants.h"
 #include "platform/youtube/YouTubeChatMessageParser.h"
+#include "platform/youtube/YouTubeEndpoints.h"
 #include "platform/youtube/YouTubeLiveChatWebClient.h"
+#include "platform/youtube/YouTubeUrlUtils.h"
 #include "platform/youtube/YouTubeStreamListClient.h"
 
 #include <QDateTime>
@@ -111,17 +114,17 @@ YouTubeAdapter::YouTubeAdapter(QObject* parent)
     connect(m_webChatClient, &YouTubeLiveChatWebClient::ended,
         this, &YouTubeAdapter::onWebChatEnded);
     connect(m_streamListClient, &YouTubeStreamListClient::started,
-        this, &YouTubeAdapter::onStreamListStarted);
+        this, &YouTubeAdapter::onStreamListStarted, Qt::QueuedConnection);
     connect(m_streamListClient, &YouTubeStreamListClient::responseObserved,
-        this, &YouTubeAdapter::onStreamListResponseObserved);
+        this, &YouTubeAdapter::onStreamListResponseObserved, Qt::QueuedConnection);
     connect(m_streamListClient, &YouTubeStreamListClient::messagesReceived,
-        this, &YouTubeAdapter::onStreamListMessagesReceived);
+        this, &YouTubeAdapter::onStreamListMessagesReceived, Qt::QueuedConnection);
     connect(m_streamListClient, &YouTubeStreamListClient::streamCheckpoint,
-        this, &YouTubeAdapter::onStreamListCheckpoint);
+        this, &YouTubeAdapter::onStreamListCheckpoint, Qt::QueuedConnection);
     connect(m_streamListClient, &YouTubeStreamListClient::streamEnded,
-        this, &YouTubeAdapter::onStreamListEnded);
+        this, &YouTubeAdapter::onStreamListEnded, Qt::QueuedConnection);
     connect(m_streamListClient, &YouTubeStreamListClient::streamFailed,
-        this, &YouTubeAdapter::onStreamListFailed);
+        this, &YouTubeAdapter::onStreamListFailed, Qt::QueuedConnection);
 }
 
 PlatformId YouTubeAdapter::platformId() const
@@ -131,139 +134,27 @@ PlatformId YouTubeAdapter::platformId() const
 
 QString YouTubeAdapter::parseManualVideoIdOverride(const QString& raw) const
 {
-    const QString trimmed = raw.trimmed();
-    if (trimmed.isEmpty()) {
-        return QString();
-    }
-
-    const QUrl url(trimmed);
-    if (url.isValid() && !url.scheme().isEmpty() && !url.host().trimmed().isEmpty()) {
-        const QUrlQuery query(url);
-        const QString v = query.queryItemValue(QStringLiteral("v")).trimmed();
-        if (!v.isEmpty()) {
-            return v;
-        }
-
-        const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-        if (!segments.isEmpty()) {
-            if (url.host().contains(QStringLiteral("youtu.be"), Qt::CaseInsensitive)) {
-                return segments.last().trimmed();
-            }
-            const int liveIndex = segments.indexOf(QStringLiteral("live"));
-            if (liveIndex >= 0 && liveIndex + 1 < segments.size()) {
-                return segments.at(liveIndex + 1).trimmed();
-            }
-            const int embedIndex = segments.indexOf(QStringLiteral("embed"));
-            if (embedIndex >= 0 && embedIndex + 1 < segments.size()) {
-                return segments.at(embedIndex + 1).trimmed();
-            }
-        }
-    }
-
-    return trimmed;
+    return YouTubeUrlUtils::parseManualVideoIdOverride(raw);
 }
 
 QString YouTubeAdapter::normalizeHandleForUrl(const QString& raw) const
 {
-    QString value = raw.trimmed();
-    if (value.isEmpty()) {
-        return QString();
-    }
-    if (value.startsWith(QStringLiteral("http://")) || value.startsWith(QStringLiteral("https://"))) {
-        const QUrl url(value);
-        const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-        for (const QString& segment : segments) {
-            if (segment.startsWith(QStringLiteral("@"))) {
-                return segment;
-            }
-        }
-        return QString();
-    }
-    if (value.startsWith(QStringLiteral("@"))) {
-        return value;
-    }
-    if (value.contains(QLatin1Char(' '))) {
-        return QString();
-    }
-    return QStringLiteral("@%1").arg(value);
+    return YouTubeUrlUtils::normalizeHandleForUrl(raw);
 }
 
 bool YouTubeAdapter::isLikelyYouTubeVideoIdCandidate(const QString& value) const
 {
-    const QString trimmed = value.trimmed();
-    static const QRegularExpression reVideoId(QStringLiteral("^[A-Za-z0-9_-]{11}$"));
-    if (!reVideoId.match(trimmed).hasMatch()) {
-        return false;
-    }
-    const QString lowered = trimmed.toLower();
-    return lowered != QStringLiteral("live_stream");
+    return YouTubeUrlUtils::isLikelyVideoIdCandidate(value);
 }
 
 QString YouTubeAdapter::extractYouTubeVideoIdFromUrl(const QUrl& url) const
 {
-    if (!url.isValid()) {
-        return QString();
-    }
-
-    const QUrlQuery query(url);
-    const QString v = query.queryItemValue(QStringLiteral("v")).trimmed();
-    if (isLikelyYouTubeVideoIdCandidate(v)) {
-        return v;
-    }
-
-    const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    if (url.host().contains(QStringLiteral("youtu.be"), Qt::CaseInsensitive) && !segments.isEmpty()) {
-        const QString candidate = segments.last().trimmed();
-        if (isLikelyYouTubeVideoIdCandidate(candidate)) {
-            return candidate;
-        }
-    }
-    const int liveIndex = segments.indexOf(QStringLiteral("live"));
-    if (liveIndex >= 0 && liveIndex + 1 < segments.size()) {
-        const QString candidate = segments.at(liveIndex + 1).trimmed();
-        if (isLikelyYouTubeVideoIdCandidate(candidate)) {
-            return candidate;
-        }
-    }
-    return QString();
+    return YouTubeUrlUtils::extractVideoIdFromUrl(url);
 }
 
 QString YouTubeAdapter::extractYouTubeVideoIdFromHtml(const QString& html) const
 {
-    QString normalized = html;
-    normalized.replace(QStringLiteral("\\u0026"), QStringLiteral("&"));
-    normalized.replace(QStringLiteral("\\u003D"), QStringLiteral("="));
-    normalized.replace(QStringLiteral("\\u003d"), QStringLiteral("="));
-    normalized.replace(QStringLiteral("\\u003F"), QStringLiteral("?"));
-    normalized.replace(QStringLiteral("\\u003f"), QStringLiteral("?"));
-    normalized.replace(QStringLiteral("\\u002F"), QStringLiteral("/"));
-    normalized.replace(QStringLiteral("\\u002f"), QStringLiteral("/"));
-    normalized.replace(QStringLiteral("\\/"), QStringLiteral("/"));
-    normalized.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
-
-    static const QList<QRegularExpression> patterns = {
-        QRegularExpression(QStringLiteral("https?://www\\.youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("https?://youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("content=\"https?://www\\.youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("href=\"https?://www\\.youtube\\.com/watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("/watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("\"videoId\"\\s*:\\s*\"([A-Za-z0-9_-]{11})\"")),
-        QRegularExpression(QStringLiteral("'VIDEO_ID'\\s*:\\s*\"([A-Za-z0-9_-]{11})\"")),
-        QRegularExpression(QStringLiteral("\"canonicalBaseUrl\"\\s*:\\s*\"/watch\\?v=([A-Za-z0-9_-]{11})")),
-        QRegularExpression(QStringLiteral("\"url\"\\s*:\\s*\"/watch\\?v=([A-Za-z0-9_-]{11})"))
-    };
-
-    for (const QRegularExpression& pattern : patterns) {
-        const QRegularExpressionMatch match = pattern.match(normalized);
-        if (match.hasMatch()) {
-            const QString candidate = match.captured(1).trimmed();
-            if (isLikelyYouTubeVideoIdCandidate(candidate)) {
-                return candidate;
-            }
-        }
-    }
-    return QString();
+    return YouTubeUrlUtils::extractVideoIdFromHtml(html);
 }
 
 void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
@@ -296,7 +187,7 @@ void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
         m_streamFailureCount = 0;
         m_streamFallbackUntilUtc = QDateTime();
         m_streamListClient->stop();
-        scheduleNextTick(100);
+        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
         return;
     }
 
@@ -304,17 +195,17 @@ void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
         m_webChatClient->stop();
         m_webChatFailureCount = 0;
         m_webChatFallbackUntilUtc = QDateTime();
-        scheduleNextTick(100);
+        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
         return;
     }
 
     if (m_liveChatId.isEmpty()) {
         setLiveStateChecking(QStringLiteral("Token updated, re-checking live state."));
-        scheduleNextTick(100);
+        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
         return;
     }
 
-    scheduleNextTick(100);
+    scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
 }
 
 bool YouTubeAdapter::shouldUseStreamListTransport() const
@@ -368,7 +259,7 @@ void YouTubeAdapter::startStreamListTransport()
         m_streamListClient->stop();
         emit error(platformId(), QStringLiteral("YT_STREAM_FALLBACK_POLLING"),
             QStringLiteral("streamList startup timeout; switching to polling fallback for 300s."));
-        scheduleNextTick(100);
+        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
     });
 }
 
@@ -397,7 +288,7 @@ void YouTubeAdapter::publishReceivedMessage(UnifiedChatMessage message)
     }
 
     m_seenMessageIds.insert(messageId);
-    if (m_seenMessageIds.size() > 10000) {
+    if (m_seenMessageIds.size() > BotManager::Limits::kYouTubeSeenMessageIdsMax) {
         m_seenMessageIds.clear();
         m_seenMessageIds.insert(messageId);
     }
@@ -504,7 +395,7 @@ void YouTubeAdapter::onStreamListEnded(const QString& reason)
     m_streamFailureCount = 0;
     m_streamTransportReady = false;
     setLiveStateOffline(detail);
-    scheduleNextTick(3000);
+    scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
 }
 
 void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& detail)
@@ -541,7 +432,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_nextWebFallbackAllowedAtUtc = QDateTime();
         m_announcedLiveChatPending = false;
         setLiveStateOffline(detail);
-        scheduleNextTick(3000);
+        scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
         return;
     }
 
@@ -550,7 +441,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_streamResumeToken.clear();
         m_streamFailureCount = 0;
         m_streamTransportReady = false;
-        scheduleNextTick(300000);
+        scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
         return;
     }
 
@@ -560,7 +451,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_streamFallbackUntilUtc = QDateTime();
         emit error(platformId(), QStringLiteral("YT_STREAM_QUOTA_BACKOFF"),
             QStringLiteral("streamList quota/rate limit detected; keeping stream transport in backoff for 300s."));
-        scheduleNextTick(300000);
+        scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
         return;
     }
 
@@ -572,7 +463,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_streamTransportReady = false;
         emit error(platformId(), QStringLiteral("YT_STREAM_FALLBACK_POLLING"),
             QStringLiteral("streamList failed repeatedly; switching to polling fallback for 300s."));
-        scheduleNextTick(100);
+        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
         return;
     }
 
@@ -658,8 +549,9 @@ void YouTubeAdapter::onWebChatFailed(const QString& code, const QString& detail)
                 .arg(m_webChatFailureCount));
     }
     setLiveStateChecking(QStringLiteral("Retrying chat connection..."));
-    const int backoffMs = qMin(3000 * m_webChatFailureCount, 15000);
-    scheduleNextTick(qMax(backoffMs, 3000));
+    const int backoffMs = qMin(BotManager::Timings::kDefaultPollIntervalMs * m_webChatFailureCount,
+                              BotManager::Timings::kDiscoveryBackoffMaxMs);
+    scheduleNextTick(qMax(backoffMs, BotManager::Timings::kDefaultPollIntervalMs));
 }
 
 void YouTubeAdapter::onWebChatEnded(const QString& reason)
@@ -676,7 +568,7 @@ void YouTubeAdapter::onWebChatEnded(const QString& reason)
     m_announcedLiveChatPending = false;
     m_nextWebFallbackAllowedAtUtc = QDateTime();
     setLiveStateOffline(reason);
-    scheduleNextTick(5000);
+    scheduleNextTick(BotManager::Timings::kDiscoveryRetryMs);
 }
 
 void YouTubeAdapter::emitLiveStateInfo(const QString& code, const QString& detail)
@@ -907,32 +799,21 @@ void YouTubeAdapter::requestOwnChannelProfile()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/channels"));
+    QUrl url(YouTube::Api::channels());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet"));
     query.addQueryItem(QStringLiteral("mine"), QStringLiteral("true"));
     query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("1"));
     url.setQuery(query);
 
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
-
-    QNetworkReply* reply = m_network->get(req);
+    QNetworkReply* reply = m_network->get(createBearerRequest(url));
     if (!reply) {
         handleRequestFailure(QStringLiteral("YOUTUBE_PROFILE_LOOKUP_FAILED"),
             QStringLiteral("Failed to create channels.mine request"));
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [this, gen, guard]() {
-        if (gen != m_generation || !guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -994,7 +875,7 @@ void YouTubeAdapter::requestActiveBroadcast()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/liveBroadcasts"));
+    QUrl url(YouTube::Api::liveBroadcasts());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet,status"));
     query.addQueryItem(QStringLiteral("mine"), QStringLiteral("true"));
@@ -1003,24 +884,13 @@ void YouTubeAdapter::requestActiveBroadcast()
     query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("50"));
     url.setQuery(query);
 
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
-
-    QNetworkReply* reply = m_network->get(req);
+    QNetworkReply* reply = m_network->get(createBearerRequest(url));
     if (!reply) {
         handleRequestFailure(QStringLiteral("REQUEST_FAILED"), QStringLiteral("Failed to create liveBroadcasts request"));
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [this, gen, guard]() {
-        if (gen != m_generation || !guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1057,7 +927,7 @@ void YouTubeAdapter::requestActiveBroadcast()
                     emit connected(platformId());
                 }
                 m_lastLiveStateCode.clear();
-                scheduleNextTick(300000);
+                scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
                 emit error(platformId(), QStringLiteral("LIVE_DISCOVERY_FAILED"), message);
                 reply->deleteLater();
                 return;
@@ -1090,7 +960,7 @@ void YouTubeAdapter::requestActiveBroadcast()
                     emit connected(platformId());
                 }
                 m_lastLiveStateCode.clear();
-                scheduleNextTick(300000);
+                scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
                 emit error(platformId(), QStringLiteral("LIVE_DISCOVERY_FAILED"), message);
                 reply->deleteLater();
                 return;
@@ -1237,7 +1107,7 @@ void YouTubeAdapter::requestActiveBroadcast()
         }
         m_bootstrapDiscoverAttempts = 10;
         m_nextPageToken.clear();
-        scheduleNextTick(100);
+        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
         reply->deleteLater();
     });
 }
@@ -1249,13 +1119,8 @@ void YouTubeAdapter::requestLiveByHandleWeb()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/%1/live").arg(m_channelHandle));
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
-
-    QNetworkReply* reply = m_network->get(req);
+    QUrl url(YouTube::Web::handleLive(m_channelHandle));
+    QNetworkReply* reply = m_network->get(createWebScrapingRequest(url));
     if (!reply) {
         emit error(platformId(), QStringLiteral("INFO_LIVE_HANDLE_URL_FAILED"),
             QStringLiteral("Failed to create handle /live lookup request."));
@@ -1263,15 +1128,7 @@ void YouTubeAdapter::requestLiveByHandleWeb()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1306,13 +1163,8 @@ void YouTubeAdapter::requestRecentStreamByHandleWeb()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/%1/streams").arg(m_channelHandle));
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
-
-    QNetworkReply* reply = m_network->get(req);
+    QUrl url(YouTube::Web::handleStreams(m_channelHandle));
+    QNetworkReply* reply = m_network->get(createWebScrapingRequest(url));
     if (!reply) {
         emit error(platformId(), QStringLiteral("INFO_LIVE_HANDLE_STREAMS_FAILED"),
             QStringLiteral("Failed to create handle /streams lookup request."));
@@ -1320,15 +1172,7 @@ void YouTubeAdapter::requestRecentStreamByHandleWeb()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1360,13 +1204,8 @@ void YouTubeAdapter::requestLiveByChannelPageWeb()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/channel/%1/live").arg(m_channelId));
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
-
-    QNetworkReply* reply = m_network->get(req);
+    QUrl url(YouTube::Web::channelLive(m_channelId));
+    QNetworkReply* reply = m_network->get(createWebScrapingRequest(url));
     if (!reply) {
         emit error(platformId(), QStringLiteral("INFO_LIVE_DISCOVERY_CHANNEL_PAGE_FAILED"),
             QStringLiteral("Failed to create channel /live lookup request."));
@@ -1374,15 +1213,7 @@ void YouTubeAdapter::requestLiveByChannelPageWeb()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1417,17 +1248,12 @@ void YouTubeAdapter::requestLiveByChannelEmbedWeb()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/embed/live_stream"));
+    QUrl url(YouTube::Web::embedLiveStream());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("channel"), m_channelId);
     url.setQuery(query);
 
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
-
-    QNetworkReply* reply = m_network->get(req);
+    QNetworkReply* reply = m_network->get(createWebScrapingRequest(url));
     if (!reply) {
         emit error(platformId(), QStringLiteral("INFO_LIVE_DISCOVERY_RSS_FALLBACK"),
             QStringLiteral("Failed to create embed live_stream lookup request; falling back to public channel feed."));
@@ -1435,15 +1261,7 @@ void YouTubeAdapter::requestLiveByChannelEmbedWeb()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1478,17 +1296,12 @@ void YouTubeAdapter::requestPublicFeedForLiveChat()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.youtube.com/feeds/videos.xml"));
+    QUrl url(YouTube::Web::feedsVideosXml());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("channel_id"), m_channelId);
     url.setQuery(query);
 
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
-
-    QNetworkReply* reply = m_network->get(req);
+    QNetworkReply* reply = m_network->get(createWebScrapingRequest(url));
     if (!reply) {
         emit error(platformId(), QStringLiteral("INFO_LIVE_DISCOVERY_RSS_FAILED"),
             QStringLiteral("Failed to create public feed lookup request."));
@@ -1496,15 +1309,7 @@ void YouTubeAdapter::requestPublicFeedForLiveChat()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1558,7 +1363,7 @@ void YouTubeAdapter::requestLiveByChannelSearch()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/search"));
+    QUrl url(YouTube::Api::search());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
     query.addQueryItem(QStringLiteral("eventType"), QStringLiteral("live"));
@@ -1588,16 +1393,7 @@ void YouTubeAdapter::requestLiveByChannelSearch()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        Q_UNUSED(gen)
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1679,122 +1475,6 @@ void YouTubeAdapter::requestLiveByChannelSearch()
     });
 }
 
-void YouTubeAdapter::requestOwnedRecentVideosForLiveChat()
-{
-    if (m_accessToken.isEmpty()) {
-        if (m_pendingConnectResult) {
-            m_pendingConnectResult = false;
-            m_connected = true;
-            emit connected(platformId());
-        }
-        ++m_bootstrapDiscoverAttempts;
-        setLiveStateChecking(QStringLiteral("Waiting for owned recent video lookup."));
-        emitLiveChatPendingInfoOnce(QStringLiteral("Connected but waiting for owned recent video lookup."));
-        scheduleNextTick(connectDiscoveryDelayMs());
-        return;
-    }
-
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/search"));
-    QUrlQuery query(url);
-    query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
-    query.addQueryItem(QStringLiteral("type"), QStringLiteral("video"));
-    query.addQueryItem(QStringLiteral("order"), QStringLiteral("date"));
-    query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("10"));
-    if (isThirdPartyChannel() && !m_channelId.isEmpty()) {
-        query.addQueryItem(QStringLiteral("channelId"), m_channelId);
-    } else {
-        query.addQueryItem(QStringLiteral("forMine"), QStringLiteral("true"));
-    }
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
-    QNetworkReply* reply = m_network->get(req);
-    if (!reply) {
-        if (m_pendingConnectResult) {
-            m_pendingConnectResult = false;
-            m_connected = true;
-            emit connected(platformId());
-        }
-        ++m_bootstrapDiscoverAttempts;
-        emit error(platformId(), QStringLiteral("OWNED_RECENT_SEARCH_FAILED"),
-            QStringLiteral("Failed to create owned recent video search request"));
-        emitLiveChatPendingInfoOnce(QStringLiteral("Connected but recent owned video lookup request could not be created."));
-        scheduleNextTick(connectDiscoveryDelayMs());
-        return;
-    }
-
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
-    connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
-        if (gen != m_generation) {
-            reply->deleteLater();
-            return;
-        }
-
-        m_requestInFlight = false;
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray body = reply->readAll();
-        QJsonObject obj;
-        const QJsonDocument doc = QJsonDocument::fromJson(body);
-        if (doc.isObject()) {
-            obj = doc.object();
-        }
-
-        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
-        if (reply->error() != QNetworkReply::NoError || !httpOk) {
-            const QString apiMessage = apiErrorMessage(obj);
-            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
-            if (m_pendingConnectResult) {
-                m_pendingConnectResult = false;
-                m_connected = true;
-                emit connected(platformId());
-            }
-            ++m_bootstrapDiscoverAttempts;
-            emit error(platformId(), QStringLiteral("OWNED_RECENT_SEARCH_FAILED"), message);
-            emitLiveChatPendingInfoOnce(QStringLiteral("Connected but recent owned video lookup did not return liveChatId."));
-            scheduleNextTick(connectDiscoveryDelayMs());
-            reply->deleteLater();
-            return;
-        }
-
-        const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
-        QString videoId;
-        for (const QJsonValue& v : items) {
-            const QJsonObject item = v.toObject();
-            const QString candidate = item.value(QStringLiteral("id")).toObject().value(QStringLiteral("videoId")).toString().trimmed();
-            if (!candidate.isEmpty()) {
-                videoId = candidate;
-                break;
-            }
-        }
-
-        if (videoId.isEmpty()) {
-            if (m_pendingConnectResult) {
-                m_pendingConnectResult = false;
-                m_connected = true;
-                emit connected(platformId());
-            }
-            ++m_bootstrapDiscoverAttempts;
-            setLiveStateOffline(QStringLiteral("No owned recent video result"));
-            emitLiveChatPendingInfoOnce(QStringLiteral("Connected but no owned recent video was found for this account."));
-            scheduleNextTick(connectDiscoveryDelayMs());
-            reply->deleteLater();
-            return;
-        }
-
-        requestVideoDetailsForLiveChat(videoId);
-        reply->deleteLater();
-    });
-}
-
 void YouTubeAdapter::requestMineUploadsPlaylistForLiveChat()
 {
     if (m_accessToken.isEmpty()) {
@@ -1810,7 +1490,7 @@ void YouTubeAdapter::requestMineUploadsPlaylistForLiveChat()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/channels"));
+    QUrl url(YouTube::Api::channels());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("contentDetails"));
     query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("1"));
@@ -1838,15 +1518,7 @@ void YouTubeAdapter::requestMineUploadsPlaylistForLiveChat()
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -1925,7 +1597,7 @@ void YouTubeAdapter::requestPlaylistItemsForLiveChat(const QString& playlistId)
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/playlistItems"));
+    QUrl url(YouTube::Api::playlistItems());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
     query.addQueryItem(QStringLiteral("playlistId"), playlistId.trimmed());
@@ -1949,15 +1621,7 @@ void YouTubeAdapter::requestPlaylistItemsForLiveChat(const QString& playlistId)
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -2045,7 +1709,7 @@ void YouTubeAdapter::requestRecentVideoDetailsForLiveChat(const QStringList& vid
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/videos"));
+    QUrl url(YouTube::Api::videos());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("liveStreamingDetails,snippet,status"));
     query.addQueryItem(QStringLiteral("id"), videoIds.join(QLatin1Char(',')));
@@ -2069,15 +1733,7 @@ void YouTubeAdapter::requestRecentVideoDetailsForLiveChat(const QStringList& vid
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -2146,7 +1802,7 @@ void YouTubeAdapter::requestRecentVideoDetailsForLiveChat(const QStringList& vid
                 m_connected = true;
                 emit connected(platformId());
             }
-            scheduleNextTick(100);
+            scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
             reply->deleteLater();
             return;
         }
@@ -2179,7 +1835,7 @@ void YouTubeAdapter::requestVideoDetailsForLiveChat(const QString& videoId)
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/videos"));
+    QUrl url(YouTube::Api::videos());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("liveStreamingDetails,status"));
     query.addQueryItem(QStringLiteral("id"), videoId.trimmed());
@@ -2202,16 +1858,7 @@ void YouTubeAdapter::requestVideoDetailsForLiveChat(const QString& videoId)
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [gen, guard]() {
-        if (!guard || guard->isFinished()) {
-            return;
-        }
-        Q_UNUSED(gen)
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen, videoId]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -2290,7 +1937,7 @@ void YouTubeAdapter::requestVideoDetailsForLiveChat(const QString& videoId)
                 m_connected = true;
                 emit connected(platformId());
             }
-            scheduleNextTick(100);
+            scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
             reply->deleteLater();
             return;
         }
@@ -2319,11 +1966,11 @@ void YouTubeAdapter::requestVideoDetailsForLiveChat(const QString& videoId)
 void YouTubeAdapter::requestLiveChatMessages()
 {
     if (m_accessToken.isEmpty() || m_liveChatId.isEmpty()) {
-        scheduleNextTick(3000);
+        scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/liveChat/messages"));
+    QUrl url(YouTube::Api::liveChatMessages());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet,authorDetails"));
     query.addQueryItem(QStringLiteral("liveChatId"), m_liveChatId);
@@ -2333,24 +1980,13 @@ void YouTubeAdapter::requestLiveChatMessages()
     }
     url.setQuery(query);
 
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
-
-    QNetworkReply* reply = m_network->get(req);
+    QNetworkReply* reply = m_network->get(createBearerRequest(url));
     if (!reply) {
         handleRequestFailure(QStringLiteral("REQUEST_FAILED"), QStringLiteral("Failed to create liveChat/messages request"));
         return;
     }
 
-    const int gen = m_generation;
-    QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [this, gen, guard]() {
-        if (gen != m_generation || !guard || guard->isFinished()) {
-            return;
-        }
-        guard->abort();
-    });
-    m_requestInFlight = true;
+    const int gen = setupRequestGuard(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
         if (gen != m_generation) {
             reply->deleteLater();
@@ -2380,7 +2016,7 @@ void YouTubeAdapter::requestLiveChatMessages()
                 m_nextWebFallbackAllowedAtUtc = QDateTime();
                 m_announcedLiveChatPending = false;
                 setLiveStateChecking(QStringLiteral("liveChatId expired; re-checking live state."));
-                scheduleNextTick(3000);
+                scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
                 reply->deleteLater();
                 return;
             }
@@ -2391,7 +2027,7 @@ void YouTubeAdapter::requestLiveChatMessages()
                 m_nextWebFallbackAllowedAtUtc = QDateTime();
                 m_announcedLiveChatPending = false;
                 setLiveStateOffline(QStringLiteral("Live chat unavailable"));
-                scheduleNextTick(5000);
+                scheduleNextTick(BotManager::Timings::kDiscoveryRetryMs);
                 emit error(platformId(), QStringLiteral("LIVE_CHAT_UNAVAILABLE"), message);
                 reply->deleteLater();
                 return;
@@ -2405,7 +2041,7 @@ void YouTubeAdapter::requestLiveChatMessages()
             }
             if (isQuotaExceededMessage(message) || isQuotaOrRateReason(reason)) {
                 m_lastLiveStateCode.clear();
-                scheduleNextTick(300000);
+                scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
                 emit error(platformId(), QStringLiteral("CHAT_RATE_LIMIT"), message);
                 reply->deleteLater();
                 return;
@@ -2436,6 +2072,85 @@ void YouTubeAdapter::requestLiveChatMessages()
     });
 }
 
+bool YouTubeAdapter::sendMessage(const QString& text)
+{
+    if (!m_connected || m_accessToken.trimmed().isEmpty()) {
+        emit messageSent(platformId(), false, QStringLiteral("Not connected or token missing"));
+        return false;
+    }
+    if (m_liveChatId.trimmed().isEmpty()) {
+        emit messageSent(platformId(), false, QStringLiteral("liveChatId unavailable"));
+        return false;
+    }
+
+    QUrl url(YouTube::Api::liveChatMessages());
+    QUrlQuery query(url);
+    query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
+    url.setQuery(query);
+
+    QNetworkRequest req = createBearerRequest(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QJsonObject payload;
+    QJsonObject snippet;
+    QJsonObject details;
+    details.insert(QStringLiteral("messageText"), text);
+    snippet.insert(QStringLiteral("liveChatId"), m_liveChatId);
+    snippet.insert(QStringLiteral("type"), QStringLiteral("textMessageEvent"));
+    snippet.insert(QStringLiteral("textMessageDetails"), details);
+    payload.insert(QStringLiteral("snippet"), snippet);
+
+    QNetworkReply* reply = m_network->post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    if (!reply) {
+        emit messageSent(platformId(), false, QStringLiteral("Failed to create send request"));
+        return false;
+    }
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        QJsonObject obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) {
+            obj = doc.object();
+        }
+
+        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
+        if (reply->error() != QNetworkReply::NoError || !httpOk) {
+            const QString apiMessage = apiErrorMessage(obj);
+            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
+            emit messageSent(platformId(), false, QStringLiteral("HTTP_%1 %2").arg(httpStatus).arg(message));
+        } else {
+            const QString messageId = obj.value(QStringLiteral("id")).toString().trimmed();
+            emit messageSent(platformId(), true, QStringLiteral("messageId=%1").arg(messageId.isEmpty() ? QStringLiteral("-") : messageId));
+        }
+        reply->deleteLater();
+    });
+    return true;
+}
+
+QNetworkRequest YouTubeAdapter::createBearerRequest(const QUrl& url) const
+{
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
+    return req;
+}
+
+QNetworkRequest YouTubeAdapter::createWebScrapingRequest(const QUrl& url) const
+{
+    QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setHeader(QNetworkRequest::UserAgentHeader,
+        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
+    return req;
+}
+
+int YouTubeAdapter::setupRequestGuard(QNetworkReply* reply)
+{
+    const int gen = setupRequestGuard(reply);
+    return gen;
+}
+
 void YouTubeAdapter::handleRequestFailure(const QString& code, const QString& message)
 {
     if (m_pendingConnectResult) {
@@ -2448,7 +2163,7 @@ void YouTubeAdapter::handleRequestFailure(const QString& code, const QString& me
     }
     if (isQuotaExceededMessage(message)) {
         m_lastLiveStateCode.clear();
-        scheduleNextTick(300000);
+        scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
     } else {
         m_lastLiveStateCode.clear();
         scheduleNextTick(connectDiscoveryDelayMs());

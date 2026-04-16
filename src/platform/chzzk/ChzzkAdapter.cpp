@@ -1,5 +1,8 @@
 #include "platform/chzzk/ChzzkAdapter.h"
+#include "core/Constants.h"
+#include "platform/chzzk/ChzzkEndpoints.h"
 #include "platform/chzzk/ChzzkEmojiResolver.h"
+#include "utils/JsonHelper.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -16,70 +19,11 @@
 #include <QWebSocket>
 
 namespace {
-QString readStringByKeys(const QJsonObject& primary, const QJsonObject& fallback, const QStringList& keys)
-{
-    for (const QString& key : keys) {
-        const QString a = primary.value(key).toString().trimmed();
-        if (!a.isEmpty()) {
-            return a;
-        }
-        const QString b = fallback.value(key).toString().trimmed();
-        if (!b.isEmpty()) {
-            return b;
-        }
-    }
-    return QString();
-}
 
-QJsonObject parseJsonObjectString(const QString& text)
-{
-    const QString trimmed = text.trimmed();
-    if (trimmed.isEmpty()) {
-        return QJsonObject();
-    }
-    const QJsonDocument doc = QJsonDocument::fromJson(trimmed.toUtf8());
-    return doc.isObject() ? doc.object() : QJsonObject();
-}
-
-QJsonObject jsonObjectFromValue(const QJsonValue& value)
-{
-    if (value.isObject()) {
-        return value.toObject();
-    }
-    if (value.isString()) {
-        return parseJsonObjectString(value.toString());
-    }
-    return QJsonObject();
-}
-
-QDateTime parseEventTime(const QString& raw)
-{
-    const QString trimmed = raw.trimmed();
-    if (trimmed.isEmpty()) {
-        return QDateTime();
-    }
-
-    QDateTime parsed = QDateTime::fromString(trimmed, Qt::ISODate);
-    if (parsed.isValid()) {
-        return parsed;
-    }
-    parsed = QDateTime::fromString(trimmed, Qt::ISODateWithMs);
-    if (parsed.isValid()) {
-        return parsed;
-    }
-
-    bool ok = false;
-    const qlonglong n = trimmed.toLongLong(&ok);
-    if (!ok || n <= 0) {
-        return QDateTime();
-    }
-
-    // 13+ digits => milliseconds, 10 digits => seconds
-    if (trimmed.size() >= 13) {
-        return QDateTime::fromMSecsSinceEpoch(n);
-    }
-    return QDateTime::fromSecsSinceEpoch(n);
-}
+using JsonHelper::readStringByKeys;
+using JsonHelper::parseJsonObjectString;
+using JsonHelper::jsonObjectFromValue;
+using JsonHelper::parseEventTime;
 
 bool looksLikeChatPayload(const QJsonObject& obj)
 {
@@ -199,7 +143,7 @@ void ChzzkAdapter::start(const PlatformSettings& settings)
         m_emojiResolver->loadEmojiPacks(m_channelId);
     }
     if (m_connectWatchdog) {
-        m_connectWatchdog->start(12000);
+        m_connectWatchdog->start(BotManager::Timings::kChzzkConnectWatchdogMs);
     }
 
     requestSessionAuth();
@@ -259,8 +203,8 @@ void ChzzkAdapter::requestSessionAuth()
     }
 
     const QUrl authUrl(m_useClientSessionAuth
-            ? QStringLiteral("https://openapi.chzzk.naver.com/open/v1/sessions/auth/client")
-            : QStringLiteral("https://openapi.chzzk.naver.com/open/v1/sessions/auth"));
+            ? Chzzk::OpenApi::sessionAuthClient()
+            : Chzzk::OpenApi::sessionAuth());
     QNetworkRequest req(authUrl);
     if (m_useClientSessionAuth) {
         if (!m_clientId.isEmpty()) {
@@ -281,7 +225,7 @@ void ChzzkAdapter::requestSessionAuth()
 
     const int gen = m_socketGeneration;
     QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(8000, this, [this, gen, guard]() {
+    QTimer::singleShot(BotManager::Timings::kChzzkSessionAuthTimeoutMs, this, [this, gen, guard]() {
         if (gen != m_socketGeneration || m_stopping || !guard || guard->isFinished()) {
             return;
         }
@@ -410,7 +354,7 @@ void ChzzkAdapter::subscribeChatEvent(const QString& sessionKey)
         return;
     }
 
-    QUrl url(QStringLiteral("https://openapi.chzzk.naver.com/open/v1/sessions/events/subscribe/chat"));
+    QUrl url(Chzzk::OpenApi::subscribeChat());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("sessionKey"), sessionKey);
     if (m_useClientSessionAuth && !m_channelId.trimmed().isEmpty()) {
@@ -605,7 +549,7 @@ void ChzzkAdapter::onSocketDisconnected()
         m_sessionKey.clear();
         emit error(platformId(), QStringLiteral("INFO_CHZZK_RECONNECTING"),
             QStringLiteral("Socket disconnected, attempting reconnection in 3 seconds."));
-        QTimer::singleShot(3000, this, [this]() {
+        QTimer::singleShot(BotManager::Timings::kChzzkReconnectDelayMs, this, [this]() {
             if (m_stopping) {
                 return;
             }
@@ -852,7 +796,7 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
                 return;
             }
             m_seenMessageIds.insert(msgId);
-            if (m_seenMessageIds.size() > 4000) {
+            if (m_seenMessageIds.size() > BotManager::Limits::kChzzkSeenMessageIdsMax) {
                 m_seenMessageIds.clear();
                 m_seenMessageIds.insert(msgId);
             }
@@ -876,6 +820,54 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
     if (!payloadRoot.isEmpty()) {
         emitFromPayloadObject(payloadRoot);
     }
+}
+
+bool ChzzkAdapter::sendMessage(const QString& text)
+{
+    if (!m_connected || m_accessToken.trimmed().isEmpty()) {
+        emit messageSent(platformId(), false, QStringLiteral("Not connected or token missing"));
+        return false;
+    }
+
+    QNetworkRequest req(QUrl(Chzzk::OpenApi::chatsSend()));
+    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
+    if (!m_clientId.isEmpty()) {
+        req.setRawHeader("Client-Id", m_clientId.toUtf8());
+    }
+    if (!m_clientSecret.isEmpty()) {
+        req.setRawHeader("Client-Secret", m_clientSecret.toUtf8());
+    }
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("message"), text);
+    QNetworkReply* reply = m_network->post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    if (!reply) {
+        emit messageSent(platformId(), false, QStringLiteral("Failed to create send request"));
+        return false;
+    }
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        QJsonObject obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) {
+            obj = doc.object();
+        }
+
+        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
+        const int apiCode = obj.value(QStringLiteral("code")).toInt(200);
+        if (reply->error() != QNetworkReply::NoError || !httpOk || apiCode != 200) {
+            const QString apiMessage = obj.value(QStringLiteral("message")).toString().trimmed();
+            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
+            emit messageSent(platformId(), false, QStringLiteral("HTTP_%1 %2").arg(httpStatus).arg(message));
+        } else {
+            emit messageSent(platformId(), true, QString());
+        }
+        reply->deleteLater();
+    });
+    return true;
 }
 
 void ChzzkAdapter::handleConnectFailure(const QString& code, const QString& message)

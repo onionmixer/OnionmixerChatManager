@@ -23,6 +23,7 @@ public:
     void stop() override;
     bool isConnected() const override;
     void applyRuntimeAccessToken(const QString& accessToken);
+    bool sendMessage(const QString& text);
 
 private:
     void resetProgressAnnouncements();

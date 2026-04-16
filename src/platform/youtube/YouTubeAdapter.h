@@ -4,6 +4,7 @@
 #include "core/IChatPlatformAdapter.h"
 
 #include <QDateTime>
+#include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSet>
 
@@ -24,6 +25,7 @@ public:
     bool isConnected() const override;
     QString currentLiveChatId() const;
     void applyRuntimeAccessToken(const QString& accessToken);
+    bool sendMessage(const QString& text);
 
 private:
     bool shouldUseWebChatTransport() const;
@@ -63,7 +65,6 @@ private:
     void requestLiveByChannelEmbedWeb();
     void requestPublicFeedForLiveChat();
     void requestLiveByChannelSearch();
-    void requestOwnedRecentVideosForLiveChat();
     void requestMineUploadsPlaylistForLiveChat();
     void requestPlaylistItemsForLiveChat(const QString& playlistId);
     void requestRecentVideoDetailsForLiveChat(const QStringList& videoIds);
@@ -74,6 +75,9 @@ private:
     QString extractYouTubeVideoIdFromUrl(const QUrl& url) const;
     QString extractYouTubeVideoIdFromHtml(const QString& html) const;
     void requestLiveChatMessages();
+    QNetworkRequest createBearerRequest(const QUrl& url) const;
+    QNetworkRequest createWebScrapingRequest(const QUrl& url) const;
+    int setupRequestGuard(QNetworkReply* reply);
     void handleRequestFailure(const QString& code, const QString& message);
 
     bool m_connected = false;

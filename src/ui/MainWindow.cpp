@@ -1,7 +1,12 @@
 #include "ui/MainWindow.h"
 
 #include "auth/PkceUtil.h"
+#include "core/Constants.h"
 #include "core/EmojiImageCache.h"
+#include "core/PlatformTraits.h"
+#include "platform/chzzk/ChzzkEndpoints.h"
+#include "platform/youtube/YouTubeEndpoints.h"
+#include "platform/youtube/YouTubeUrlUtils.h"
 #include "i18n/AppLanguage.h"
 #include "ui/ChatBubbleWidget.h"
 #include "ui/ConfigurationDialog.h"
@@ -249,22 +254,17 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
         this, &MainWindow::onChatReceived);
     connect(&m_chzzkAdapter, &IChatPlatformAdapter::chatReceived,
         this, &MainWindow::onChatReceived);
+    connect(&m_youtubeAdapter, &IChatPlatformAdapter::messageSent,
+        this, &MainWindow::onMessageSent);
+    connect(&m_chzzkAdapter, &IChatPlatformAdapter::messageSent,
+        this, &MainWindow::onMessageSent);
 
     m_configurationDialog = new ConfigurationDialog(this);
     m_configurationDialog->setSnapshot(m_snapshot);
     m_chatterListDialog = new ChatterListDialog(this);
     connect(m_chatterListDialog, &ChatterListDialog::resetRequested, this, &MainWindow::onResetChatterList);
 
-    connect(m_configurationDialog, &ConfigurationDialog::configApplyRequested,
-        this, &MainWindow::onConfigApplyRequested);
-    connect(m_configurationDialog, &ConfigurationDialog::tokenRefreshRequested,
-        this, &MainWindow::onTokenRefreshRequested);
-    connect(m_configurationDialog, &ConfigurationDialog::interactiveAuthRequested,
-        this, &MainWindow::onInteractiveAuthRequested);
-    connect(m_configurationDialog, &ConfigurationDialog::tokenDeleteRequested,
-        this, &MainWindow::onTokenDeleteRequested);
-    connect(m_configurationDialog, &ConfigurationDialog::platformConfigValidationRequested,
-        this, &MainWindow::onPlatformConfigValidationRequested);
+    connectConfigurationDialogSignals();
 
     connect(&m_oauthLocalServer, &OAuthLocalServer::callbackReceived,
         this, &MainWindow::onOAuthCallbackReceived);
@@ -632,7 +632,7 @@ void MainWindow::onPlatformConfigValidationRequested(PlatformId platform, const 
 
     const QString target = platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK");
     m_txtEventLog->append(QStringLiteral("[CONFIG-TEST] %1 -> %2").arg(target, ok ? QStringLiteral("OK") : QStringLiteral("FAIL")));
-    statusBar()->showMessage(tr("%1 config test: %2").arg(target, ok ? tr("OK") : tr("FAIL")), 3000);
+    statusBar()->showMessage(tr("%1 config test: %2").arg(target, ok ? tr("OK") : tr("FAIL")), BotManager::Timings::kStatusBarDisplayMs);
 }
 
 void MainWindow::onOAuthCallbackReceived(PlatformId platform, const QString& code, const QString& state, const QString& errorCode, const QString& errorDescription)
@@ -1005,6 +1005,71 @@ void MainWindow::setupUi()
     auto* root = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(root);
 
+    rootLayout->addLayout(setupTopBar(root));
+    rootLayout->addLayout(setupStatusBar(root));
+
+    setupChatTable(root);
+    setupActionPanel(root);
+
+    m_upperSplitter = new QSplitter(Qt::Horizontal, root);
+    m_upperSplitter->addWidget(m_tblChat);
+    m_upperSplitter->addWidget(m_grpActionPanel);
+    m_upperSplitter->setStretchFactor(0, 3);
+    m_upperSplitter->setStretchFactor(1, 2);
+
+    QWidget* composerWrap = setupComposer(root);
+
+    m_txtEventLog = new QTextEdit(root);
+    m_txtEventLog->setReadOnly(true);
+    m_txtEventLog->setObjectName(QStringLiteral("txtEventLog"));
+    m_txtEventLog->document()->setMaximumBlockCount(BotManager::Limits::kEventLogMaxBlocks);
+
+    auto* bottomWrap = new QWidget(root);
+    auto* bottomLayout = new QVBoxLayout(bottomWrap);
+    bottomLayout->setContentsMargins(0, 0, 0, 0);
+    bottomLayout->setSpacing(4);
+    bottomLayout->addWidget(composerWrap, 0);
+    bottomLayout->addWidget(m_txtEventLog, 1);
+
+    m_mainSplitter = new QSplitter(Qt::Vertical, root);
+    m_mainSplitter->addWidget(m_upperSplitter);
+    m_mainSplitter->addWidget(bottomWrap);
+    m_mainSplitter->setStretchFactor(0, 4);
+    m_mainSplitter->setStretchFactor(1, 1);
+
+    rootLayout->addWidget(m_mainSplitter, 1);
+
+    setCentralWidget(root);
+    resize(1000, 700);
+
+    {
+        QSettings ws(m_configDir + QStringLiteral("/app.ini"), QSettings::IniFormat);
+        ws.beginGroup(QStringLiteral("window"));
+        const QByteArray geometry = ws.value(QStringLiteral("geometry")).toByteArray();
+        if (!geometry.isEmpty()) {
+            restoreGeometry(geometry);
+        }
+        const QByteArray mainSplit = ws.value(QStringLiteral("main_splitter")).toByteArray();
+        if (!mainSplit.isEmpty() && m_mainSplitter) {
+            m_mainSplitter->restoreState(mainSplit);
+        }
+        const QByteArray upperSplit = ws.value(QStringLiteral("upper_splitter")).toByteArray();
+        if (!upperSplit.isEmpty() && m_upperSplitter) {
+            m_upperSplitter->restoreState(upperSplit);
+        }
+        ws.endGroup();
+    }
+
+    connect(m_btnConnectToggle, &QPushButton::clicked, this, &MainWindow::onConnectToggleClicked);
+    connect(m_btnToggleChatView, &QPushButton::clicked, this, &MainWindow::onToggleChatViewClicked);
+    connect(m_btnOpenChatterList, &QPushButton::clicked, this, &MainWindow::onOpenChatterList);
+    connect(m_btnOpenConfiguration, &QPushButton::clicked, this, &MainWindow::onOpenConfiguration);
+    retranslateUi();
+    updateComposerUiState();
+}
+
+QLayout* MainWindow::setupTopBar(QWidget* root)
+{
     auto* topLayout = new QHBoxLayout;
     m_btnConnectToggle = new QPushButton(root);
     m_btnConnectToggle->setObjectName(QStringLiteral("btnConnectToggle"));
@@ -1027,14 +1092,22 @@ void MainWindow::setupUi()
     topLayout->addStretch();
     topLayout->addWidget(m_btnOpenChatterList);
     topLayout->addWidget(m_btnOpenConfiguration);
+    return topLayout;
+}
 
+QLayout* MainWindow::setupStatusBar(QWidget* root)
+{
     auto* statusLayout = new QHBoxLayout;
     m_lblYouTubeStatus = new QLabel(root);
     m_lblChzzkStatus = new QLabel(root);
     statusLayout->addWidget(m_lblYouTubeStatus);
     statusLayout->addWidget(m_lblChzzkStatus);
     statusLayout->addStretch();
+    return statusLayout;
+}
 
+void MainWindow::setupChatTable(QWidget* root)
+{
     m_tblChat = new QTableWidget(root);
     m_tblChat->setObjectName(QStringLiteral("tblUnifiedChat"));
     m_tblChat->verticalHeader()->setVisible(false);
@@ -1050,7 +1123,10 @@ void MainWindow::setupUi()
     connect(copyAction, &QAction::triggered, this, &MainWindow::onCopySelectedChat);
     m_tblChat->setContextMenuPolicy(Qt::ActionsContextMenu);
     m_tblChat->addAction(copyAction);
+}
 
+void MainWindow::setupActionPanel(QWidget* root)
+{
     m_grpActionPanel = new QGroupBox(root);
     m_grpActionPanel->setObjectName(QStringLiteral("grpActionPanel"));
     auto* actionPanelLayout = new QVBoxLayout(m_grpActionPanel);
@@ -1176,13 +1252,10 @@ void MainWindow::setupUi()
     connect(m_btnActionYoutubeDeleteMessage, &QPushButton::clicked, this, &MainWindow::onActionYoutubeDeleteMessage);
     connect(m_btnActionYoutubeTimeout, &QPushButton::clicked, this, &MainWindow::onActionYoutubeTimeout);
     connect(m_btnActionChzzkRestrict, &QPushButton::clicked, this, &MainWindow::onActionChzzkRestrict);
+}
 
-    m_upperSplitter = new QSplitter(Qt::Horizontal, root);
-    m_upperSplitter->addWidget(m_tblChat);
-    m_upperSplitter->addWidget(m_grpActionPanel);
-    m_upperSplitter->setStretchFactor(0, 3);
-    m_upperSplitter->setStretchFactor(1, 2);
-
+QWidget* MainWindow::setupComposer(QWidget* root)
+{
     auto* composerWrap = new QWidget(root);
     composerWrap->setObjectName(QStringLiteral("composerWrap"));
     auto* composerLayout = new QHBoxLayout(composerWrap);
@@ -1206,56 +1279,7 @@ void MainWindow::setupUi()
     connect(m_btnComposerSend, &QPushButton::clicked, this, &MainWindow::onActionSendMessage);
     composerLayout->addWidget(m_edtComposer, 1);
     composerLayout->addWidget(m_btnComposerSend, 0, Qt::AlignBottom);
-
-    m_txtEventLog = new QTextEdit(root);
-    m_txtEventLog->setReadOnly(true);
-    m_txtEventLog->setObjectName(QStringLiteral("txtEventLog"));
-    m_txtEventLog->document()->setMaximumBlockCount(10000);
-
-    auto* bottomWrap = new QWidget(root);
-    auto* bottomLayout = new QVBoxLayout(bottomWrap);
-    bottomLayout->setContentsMargins(0, 0, 0, 0);
-    bottomLayout->setSpacing(4);
-    bottomLayout->addWidget(composerWrap, 0);
-    bottomLayout->addWidget(m_txtEventLog, 1);
-
-    m_mainSplitter = new QSplitter(Qt::Vertical, root);
-    m_mainSplitter->addWidget(m_upperSplitter);
-    m_mainSplitter->addWidget(bottomWrap);
-    m_mainSplitter->setStretchFactor(0, 4);
-    m_mainSplitter->setStretchFactor(1, 1);
-
-    rootLayout->addLayout(topLayout);
-    rootLayout->addLayout(statusLayout);
-    rootLayout->addWidget(m_mainSplitter, 1);
-
-    setCentralWidget(root);
-    resize(1000, 700);
-
-    {
-        QSettings ws(m_configDir + QStringLiteral("/app.ini"), QSettings::IniFormat);
-        ws.beginGroup(QStringLiteral("window"));
-        const QByteArray geometry = ws.value(QStringLiteral("geometry")).toByteArray();
-        if (!geometry.isEmpty()) {
-            restoreGeometry(geometry);
-        }
-        const QByteArray mainSplit = ws.value(QStringLiteral("main_splitter")).toByteArray();
-        if (!mainSplit.isEmpty() && m_mainSplitter) {
-            m_mainSplitter->restoreState(mainSplit);
-        }
-        const QByteArray upperSplit = ws.value(QStringLiteral("upper_splitter")).toByteArray();
-        if (!upperSplit.isEmpty() && m_upperSplitter) {
-            m_upperSplitter->restoreState(upperSplit);
-        }
-        ws.endGroup();
-    }
-
-    connect(m_btnConnectToggle, &QPushButton::clicked, this, &MainWindow::onConnectToggleClicked);
-    connect(m_btnToggleChatView, &QPushButton::clicked, this, &MainWindow::onToggleChatViewClicked);
-    connect(m_btnOpenChatterList, &QPushButton::clicked, this, &MainWindow::onOpenChatterList);
-    connect(m_btnOpenConfiguration, &QPushButton::clicked, this, &MainWindow::onOpenConfiguration);
-    retranslateUi();
-    updateComposerUiState();
+    return composerWrap;
 }
 
 void MainWindow::retranslateUi()
@@ -1344,16 +1368,8 @@ void MainWindow::retranslateUi()
     updateActionPanel();
 }
 
-void MainWindow::recreateAuxiliaryDialogs(bool reopenConfiguration, bool reopenChatterList)
+void MainWindow::connectConfigurationDialogSignals()
 {
-    if (m_configurationDialog) {
-        disconnect(m_configurationDialog, nullptr, this, nullptr);
-        m_configurationDialog->hide();
-        m_configurationDialog->deleteLater();
-        m_configurationDialog = nullptr;
-    }
-    m_configurationDialog = new ConfigurationDialog(this);
-    m_configurationDialog->setSnapshot(m_snapshot);
     connect(m_configurationDialog, &ConfigurationDialog::configApplyRequested,
         this, &MainWindow::onConfigApplyRequested);
     connect(m_configurationDialog, &ConfigurationDialog::tokenRefreshRequested,
@@ -1364,6 +1380,19 @@ void MainWindow::recreateAuxiliaryDialogs(bool reopenConfiguration, bool reopenC
         this, &MainWindow::onTokenDeleteRequested);
     connect(m_configurationDialog, &ConfigurationDialog::platformConfigValidationRequested,
         this, &MainWindow::onPlatformConfigValidationRequested);
+}
+
+void MainWindow::recreateAuxiliaryDialogs(bool reopenConfiguration, bool reopenChatterList)
+{
+    if (m_configurationDialog) {
+        disconnect(m_configurationDialog, nullptr, this, nullptr);
+        m_configurationDialog->hide();
+        m_configurationDialog->deleteLater();
+        m_configurationDialog = nullptr;
+    }
+    m_configurationDialog = new ConfigurationDialog(this);
+    m_configurationDialog->setSnapshot(m_snapshot);
+    connectConfigurationDialogSignals();
     refreshAllTokenUi();
     if (reopenConfiguration) {
         m_configurationDialog->show();
@@ -1651,7 +1680,7 @@ void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QStr
             return;
         }
         m_recentMessageIds.insert(msgId);
-        if (m_recentMessageIds.size() > 2000) {
+        if (m_recentMessageIds.size() > BotManager::Limits::kRecentMessageIdsMax) {
             m_recentMessageIds.clear();
             m_recentMessageIds.insert(msgId);
         }
@@ -1688,7 +1717,7 @@ void MainWindow::recordChatter(const UnifiedChatMessage& message, const QString&
     ChatterListEntry entry = m_chatterStats.value(key);
     const bool isNew = (entry.count == 0);
     if (isNew) {
-        if (m_chatterStats.size() >= 10000) {
+        if (m_chatterStats.size() >= BotManager::Limits::kChatterStatsMax) {
             return;
         }
         entry.platform = message.platform;
@@ -1736,8 +1765,7 @@ void MainWindow::rebuildChatterStatsFromMessages()
         }
     }
 
-    // Prune to 10000 entries by removing oldest (lastSeen) if exceeded
-    const int kMaxChatterStats = 10000;
+    const int kMaxChatterStats = BotManager::Limits::kChatterStatsMax;
     if (updated.size() > kMaxChatterStats) {
         QVector<QPair<QDateTime, QString>> byAge;
         byAge.reserve(updated.size());
@@ -1833,8 +1861,6 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
         fontExtraStyle += QStringLiteral("font-style:italic;");
     }
 
-    const bool isYouTube = (message.platform == PlatformId::YouTube);
-
     // Emoji replacement
     QString messageHtml = message.richText.isEmpty()
         ? message.text.toHtmlEscaped()
@@ -1860,17 +1886,15 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
         }
     }
 
+    const PlatformId plat = message.platform;
     ChatBubbleParams params;
-    params.badgeText = isYouTube ? QStringLiteral("\u25B6") : QStringLiteral("Z");
-    params.badgeStyle = isYouTube
-        ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
-              .arg(badgeSize / 2).arg(badgeFontSize)
-        : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
-              .arg(badgeSize / 2).arg(badgeFontSize);
+    params.badgeText = PlatformTraits::badgeSymbol(plat);
+    params.badgeStyle = QStringLiteral("background:%1; color:%2; border-radius:%3px; font-weight:700; font-size:%4px;")
+                            .arg(PlatformTraits::badgeBgColor(plat), PlatformTraits::badgeFgColor(plat))
+                            .arg(badgeSize / 2).arg(badgeFontSize);
     params.authorText = authorDisplay.toHtmlEscaped();
-    params.authorStyle = isYouTube
-        ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
-        : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle);
+    params.authorStyle = QStringLiteral("color:%1; font-weight:700; font-size:%2px;%3")
+                             .arg(PlatformTraits::authorColor(plat)).arg(fontSize).arg(fontExtraStyle);
     params.messageHtml = messageHtml;
     params.messageStyle = QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2")
                               .arg(fontSize).arg(fontExtraStyle);
@@ -1951,17 +1975,7 @@ QString MainWindow::displayAuthorLabel(const UnifiedChatMessage& message) const
 
 QString MainWindow::normalizeYouTubeHandle(const QString& value) const
 {
-    QString normalized = value.trimmed();
-    if (normalized.isEmpty()) {
-        return QString();
-    }
-    if (normalized.startsWith(QStringLiteral("@"))) {
-        return normalized;
-    }
-    if (normalized.contains(QLatin1Char(' '))) {
-        return QString();
-    }
-    return QStringLiteral("@%1").arg(normalized);
+    return YouTubeUrlUtils::normalizeHandle(value);
 }
 
 void MainWindow::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message)
@@ -1985,7 +1999,7 @@ void MainWindow::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& m
         return;
     }
 
-    if (m_youtubeAuthorHandleLookupQueue.size() >= 500) {
+    if (m_youtubeAuthorHandleLookupQueue.size() >= BotManager::Limits::kAuthorLookupQueueMax) {
         return;
     }
     m_youtubeAuthorHandlePending.insert(authorId);
@@ -1997,7 +2011,7 @@ void MainWindow::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& m
 
 void MainWindow::flushYouTubeAuthorHandleLookupQueue()
 {
-    if (m_pendingYouTubeAuthorLookup || m_youtubeAuthorHandleLookupQueue.isEmpty()) {
+    if (m_awaitingYouTubeAuthorLookup || m_youtubeAuthorHandleLookupQueue.isEmpty()) {
         return;
     }
 
@@ -2017,7 +2031,7 @@ void MainWindow::flushYouTubeAuthorHandleLookupQueue()
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/channels"));
+    QUrl url(YouTube::Api::channels());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
     query.addQueryItem(QStringLiteral("id"), authorIds.join(QLatin1Char(',')));
@@ -2034,10 +2048,10 @@ void MainWindow::flushYouTubeAuthorHandleLookupQueue()
         }
         return;
     }
-    m_pendingYouTubeAuthorLookup = true;
+    m_awaitingYouTubeAuthorLookup = true;
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, authorIds]() {
-        m_pendingYouTubeAuthorLookup = false;
+        m_awaitingYouTubeAuthorLookup = false;
 
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
@@ -2060,7 +2074,7 @@ void MainWindow::flushYouTubeAuthorHandleLookupQueue()
                 }
                 const QString normalized = normalizeYouTubeHandle(customUrl);
                 if (!channelId.isEmpty() && !normalized.isEmpty()) {
-                    if (m_youtubeAuthorHandleCache.size() > 5000) {
+                    if (m_youtubeAuthorHandleCache.size() > BotManager::Limits::kAuthorHandleCacheMax) {
                         m_youtubeAuthorHandleCache.clear();
                     }
                     m_youtubeAuthorHandleCache.insert(channelId, normalized);
@@ -2280,7 +2294,7 @@ void MainWindow::executeAction(const QString& actionId)
 
     m_txtEventLog->append(QStringLiteral("[ACTION-FAIL] %1 code=%2 message=%3")
                               .arg(actionId, result.errorCode, result.message));
-    statusBar()->showMessage(tr("Action failed: %1 (%2)").arg(actionId, result.errorCode), 3000);
+    statusBar()->showMessage(tr("Action failed: %1 (%2)").arg(actionId, result.errorCode), BotManager::Timings::kStatusBarDisplayMs);
 }
 
 void MainWindow::updateComposerUiState()
@@ -2303,6 +2317,16 @@ void MainWindow::updateComposerUiState()
     setActionButtonState(m_btnComposerSend, enabled, reason);
 }
 
+void MainWindow::onMessageSent(PlatformId platform, bool ok, const QString& detail)
+{
+    const QString plat = platformKey(platform);
+    if (ok) {
+        m_txtEventLog->append(QStringLiteral("[SEND-OK] %1 %2").arg(plat, detail));
+    } else {
+        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] %1 %2").arg(plat, detail));
+    }
+}
+
 void MainWindow::sendComposedMessage()
 {
     if (!m_edtComposer) {
@@ -2315,11 +2339,15 @@ void MainWindow::sendComposedMessage()
     }
 
     int started = 0;
-    if (dispatchSendToYouTube(text)) {
-        ++started;
+    if (m_youtubeAdapter.isConnected() && isPlatformLiveOnline(PlatformId::YouTube)) {
+        if (m_youtubeAdapter.sendMessage(text)) {
+            ++started;
+        }
     }
-    if (dispatchSendToChzzk(text)) {
-        ++started;
+    if (m_chzzkAdapter.isConnected() && isPlatformLiveOnline(PlatformId::Chzzk)) {
+        if (m_chzzkAdapter.sendMessage(text)) {
+            ++started;
+        }
     }
 
     if (started <= 0) {
@@ -2337,133 +2365,6 @@ void MainWindow::sendComposedMessage()
     m_txtEventLog->append(QStringLiteral("[SEND-SUMMARY] dispatched=%1").arg(started));
 }
 
-bool MainWindow::dispatchSendToYouTube(const QString& text)
-{
-    if (!m_youtubeAdapter.isConnected() || !isPlatformLiveOnline(PlatformId::YouTube)) {
-        return false;
-    }
-
-    TokenRecord record;
-    if (!m_tokenVault.read(PlatformId::YouTube, &record) || record.accessToken.trimmed().isEmpty()) {
-        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=TOKEN_MISSING msg=No access token"));
-        return false;
-    }
-
-    const QString liveChatId = m_youtubeAdapter.currentLiveChatId().trimmed();
-    if (liveChatId.isEmpty()) {
-        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=LIVECHAT_ID_MISSING msg=liveChatId unavailable"));
-        return false;
-    }
-
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/liveChat/messages"));
-    QUrlQuery query(url);
-    query.addQueryItem(QStringLiteral("part"), QStringLiteral("snippet"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-
-    QJsonObject payload;
-    QJsonObject snippet;
-    QJsonObject details;
-    details.insert(QStringLiteral("messageText"), text);
-    snippet.insert(QStringLiteral("liveChatId"), liveChatId);
-    snippet.insert(QStringLiteral("type"), QStringLiteral("textMessageEvent"));
-    snippet.insert(QStringLiteral("textMessageDetails"), details);
-    payload.insert(QStringLiteral("snippet"), snippet);
-
-    QNetworkReply* reply = m_networkAccessManager.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    if (!reply) {
-        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=REQUEST_FAILED msg=Failed to create send request"));
-        return false;
-    }
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray body = reply->readAll();
-        QJsonObject obj;
-        const QJsonDocument doc = QJsonDocument::fromJson(body);
-        if (doc.isObject()) {
-            obj = doc.object();
-        }
-
-        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
-        if (reply->error() != QNetworkReply::NoError || !httpOk) {
-            const QString apiMessage = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString().trimmed();
-            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
-            m_txtEventLog->append(QStringLiteral("[SEND-FAIL] youtube code=HTTP_%1 msg=%2")
-                                      .arg(httpStatus)
-                                      .arg(message));
-            reply->deleteLater();
-            return;
-        }
-
-        const QString messageId = obj.value(QStringLiteral("id")).toString().trimmed();
-        m_txtEventLog->append(QStringLiteral("[SEND-OK] youtube messageId=%1")
-                                  .arg(messageId.isEmpty() ? QStringLiteral("-") : messageId));
-        reply->deleteLater();
-    });
-    return true;
-}
-
-bool MainWindow::dispatchSendToChzzk(const QString& text)
-{
-    if (!m_chzzkAdapter.isConnected() || !isPlatformLiveOnline(PlatformId::Chzzk)) {
-        return false;
-    }
-
-    TokenRecord record;
-    if (!m_tokenVault.read(PlatformId::Chzzk, &record) || record.accessToken.trimmed().isEmpty()) {
-        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] chzzk code=TOKEN_MISSING msg=No access token"));
-        return false;
-    }
-
-    QNetworkRequest req(QUrl(QStringLiteral("https://openapi.chzzk.naver.com/open/v1/chats/send")));
-    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
-    if (!m_snapshot.chzzk.clientId.trimmed().isEmpty()) {
-        req.setRawHeader("Client-Id", m_snapshot.chzzk.clientId.trimmed().toUtf8());
-    }
-    if (!m_snapshot.chzzk.clientSecret.trimmed().isEmpty()) {
-        req.setRawHeader("Client-Secret", m_snapshot.chzzk.clientSecret.trimmed().toUtf8());
-    }
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-
-    QJsonObject payload;
-    payload.insert(QStringLiteral("message"), text);
-    QNetworkReply* reply = m_networkAccessManager.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    if (!reply) {
-        m_txtEventLog->append(QStringLiteral("[SEND-FAIL] chzzk code=REQUEST_FAILED msg=Failed to create send request"));
-        return false;
-    }
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray body = reply->readAll();
-        QJsonObject obj;
-        const QJsonDocument doc = QJsonDocument::fromJson(body);
-        if (doc.isObject()) {
-            obj = doc.object();
-        }
-
-        const bool httpOk = httpStatus >= 200 && httpStatus < 300;
-        const int apiCode = obj.value(QStringLiteral("code")).toInt(200);
-        if (reply->error() != QNetworkReply::NoError || !httpOk || apiCode != 200) {
-            const QString apiMessage = obj.value(QStringLiteral("message")).toString().trimmed();
-            const QString message = apiMessage.isEmpty() ? reply->errorString() : apiMessage;
-            m_txtEventLog->append(QStringLiteral("[SEND-FAIL] chzzk code=HTTP_%1 msg=%2")
-                                      .arg(httpStatus)
-                                      .arg(message));
-            reply->deleteLater();
-            return;
-        }
-
-        m_txtEventLog->append(QStringLiteral("[SEND-OK] chzzk"));
-        reply->deleteLater();
-    });
-    return true;
-}
-
 void MainWindow::pushComposerHistory(const QString& text)
 {
     const QString normalized = text;
@@ -2475,7 +2376,7 @@ void MainWindow::pushComposerHistory(const QString& text)
         return;
     }
     m_sendHistory.push_back(normalized);
-    while (m_sendHistory.size() > 100) {
+    while (m_sendHistory.size() > BotManager::Limits::kSendHistoryMax) {
         m_sendHistory.removeFirst();
     }
     m_sendHistoryIndex = m_sendHistory.size();
@@ -2609,7 +2510,7 @@ void MainWindow::initializeLiveProbe()
     refreshLiveBroadcastIndicators();
 
     m_liveProbeTimer = new QTimer(this);
-    m_liveProbeTimer->setInterval(3000);
+    m_liveProbeTimer->setInterval(BotManager::Timings::kLiveProbeIntervalMs);
     connect(m_liveProbeTimer, &QTimer::timeout, this, &MainWindow::onLiveProbeTimeout);
     m_liveProbeTimer->start();
     onLiveProbeTimeout();
@@ -2664,7 +2565,7 @@ void MainWindow::probeLiveStatus(PlatformId platform)
     }
 
     m_nextPeriodicChzzkProbeAtUtc = QDateTime::currentDateTimeUtc().addSecs(10);
-    if (!m_pendingChzzkLiveProbe) {
+    if (!m_awaitingChzzkLiveProbe) {
         probeChzzkLiveStatus(record.accessToken);
     }
 }
@@ -2681,8 +2582,7 @@ void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
         return;
     }
 
-    QUrl url(QStringLiteral("https://api.chzzk.naver.com/service/v3/channels/%1/live-detail")
-                 .arg(QString::fromUtf8(QUrl::toPercentEncoding(channelId))));
+    QUrl url(Chzzk::ServiceApi::liveDetail(QString::fromUtf8(QUrl::toPercentEncoding(channelId))));
     QNetworkRequest req(url);
 
     QNetworkReply* reply = m_networkAccessManager.get(req);
@@ -2690,10 +2590,10 @@ void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
         setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::ERROR, tr("Failed to create live-detail request"));
         return;
     }
-    m_pendingChzzkLiveProbe = true;
+    m_awaitingChzzkLiveProbe = true;
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        m_pendingChzzkLiveProbe = false;
+        m_awaitingChzzkLiveProbe = false;
 
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
@@ -2843,11 +2743,11 @@ void MainWindow::syncYouTubeProfileFromAccessToken(const QString& accessToken)
     if (token.isEmpty()) {
         return;
     }
-    if (m_pendingYouTubeProfileSync) {
+    if (m_awaitingYouTubeProfileSync) {
         return;
     }
 
-    QUrl url(QStringLiteral("https://www.googleapis.com/youtube/v3/channels"));
+    QUrl url(YouTube::Api::channels());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet"));
     query.addQueryItem(QStringLiteral("mine"), QStringLiteral("true"));
@@ -2861,10 +2761,10 @@ void MainWindow::syncYouTubeProfileFromAccessToken(const QString& accessToken)
         m_txtEventLog->append(QStringLiteral("[YOUTUBE-PROFILE-FAIL] Failed to create channels request"));
         return;
     }
-    m_pendingYouTubeProfileSync = true;
+    m_awaitingYouTubeProfileSync = true;
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        m_pendingYouTubeProfileSync = false;
+        m_awaitingYouTubeProfileSync = false;
 
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
@@ -2927,11 +2827,11 @@ void MainWindow::syncChzzkProfileFromAccessToken(const QString& accessToken)
     if (token.isEmpty()) {
         return;
     }
-    if (m_pendingChzzkProfileSync) {
+    if (m_awaitingChzzkProfileSync) {
         return;
     }
 
-    QNetworkRequest req(QUrl(QStringLiteral("https://openapi.chzzk.naver.com/open/v1/users/me")));
+    QNetworkRequest req(QUrl(Chzzk::OpenApi::usersMe()));
     req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(token).toUtf8());
     if (!m_snapshot.chzzk.clientId.trimmed().isEmpty()) {
         req.setRawHeader("Client-Id", m_snapshot.chzzk.clientId.trimmed().toUtf8());
@@ -2945,10 +2845,10 @@ void MainWindow::syncChzzkProfileFromAccessToken(const QString& accessToken)
         m_txtEventLog->append(QStringLiteral("[CHZZK-PROFILE-FAIL] Failed to create users/me request"));
         return;
     }
-    m_pendingChzzkProfileSync = true;
+    m_awaitingChzzkProfileSync = true;
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        m_pendingChzzkProfileSync = false;
+        m_awaitingChzzkProfileSync = false;
 
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
@@ -3092,11 +2992,10 @@ AppSettingsSnapshot MainWindow::buildRuntimeConnectSnapshot(const AppSettingsSna
 
 void MainWindow::applyRuntimeAccessTokenToAdapter(PlatformId platform, const QString& accessToken)
 {
-    if (platform == PlatformId::YouTube) {
-        m_youtubeAdapter.applyRuntimeAccessToken(accessToken);
-        return;
-    }
-    m_chzzkAdapter.applyRuntimeAccessToken(accessToken);
+    IChatPlatformAdapter* adapter = (platform == PlatformId::YouTube)
+        ? static_cast<IChatPlatformAdapter*>(&m_youtubeAdapter)
+        : static_cast<IChatPlatformAdapter*>(&m_chzzkAdapter);
+    adapter->applyRuntimeAccessToken(accessToken);
 }
 
 bool MainWindow::startTokenRefreshFlow(PlatformId platform, const PlatformSettings& settings, const TokenRecord& currentRecord)
