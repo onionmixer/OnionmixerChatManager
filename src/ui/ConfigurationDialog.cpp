@@ -1,7 +1,7 @@
 #include "ui/ConfigurationDialog.h"
 #include "core/Constants.h"
-#include "core/PlatformTraits.h"
-#include "ui/ChatBubbleWidget.h"
+#include "ui/ChatBubbleDelegate.h"
+#include "ui/ChatMessageModel.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -16,6 +16,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListView>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -753,10 +754,19 @@ QWidget* ConfigurationDialog::createGeneralTab()
     layout->addRow(tr("Chat Max Messages"), m_spnChatMaxMessages);
 
     auto* previewGroup = new QGroupBox(tr("Chat Preview"), page);
-    m_chatPreviewContainer = new QWidget(previewGroup);
+    m_chatPreviewModel = new ChatMessageModel(this);
+    m_chatPreviewDelegate = new ChatBubbleDelegate(this);
+    m_chatPreviewList = new QListView(previewGroup);
+    m_chatPreviewList->setModel(m_chatPreviewModel);
+    m_chatPreviewList->setItemDelegate(m_chatPreviewDelegate);
+    m_chatPreviewList->setSelectionMode(QAbstractItemView::NoSelection);
+    m_chatPreviewList->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_chatPreviewList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_chatPreviewList->setUniformItemSizes(false);
+    m_chatPreviewList->setFrameShape(QFrame::NoFrame);
     auto* previewGroupLayout = new QVBoxLayout(previewGroup);
     previewGroupLayout->setContentsMargins(4, 4, 4, 4);
-    previewGroupLayout->addWidget(m_chatPreviewContainer);
+    previewGroupLayout->addWidget(m_chatPreviewList);
     previewGroup->setStyleSheet(QStringLiteral("QGroupBox { background: #FFFFFF; }"));
     layout->addRow(previewGroup);
 
@@ -773,84 +783,44 @@ QWidget* ConfigurationDialog::createGeneralTab()
 
 void ConfigurationDialog::updateChatPreview()
 {
-    if (!m_chatPreviewContainer) {
+    if (!m_chatPreviewDelegate || !m_chatPreviewModel || !m_chatPreviewList) {
         return;
     }
 
-    // Clear previous preview
-    QLayout* oldLayout = m_chatPreviewContainer->layout();
-    if (oldLayout) {
-        QLayoutItem* item;
-        while ((item = oldLayout->takeAt(0)) != nullptr) {
-            delete item->widget();
-            delete item;
-        }
-        delete oldLayout;
-    }
-
-    const int fontSize = qBound(8, m_spnChatFontSize->value(), 24);
-    const int lineSpacing = qBound(0, m_spnChatLineSpacing->value(), 20);
-    const bool isBold = m_chkChatFontBold->isChecked();
-    const bool isItalic = m_chkChatFontItalic->isChecked();
-    const int badgeSize = fontSize + 2;
-    const int badgeFontSize = qMax(fontSize - 4, 6);
-    const int timestampFontSize = qMax(fontSize - 2, 7);
+    // Update delegate fonts
     const QString fontFamily = m_fntChat->currentFont().family().trimmed();
-    QString fontExtraStyle;
-    if (!fontFamily.isEmpty()) {
-        fontExtraStyle += QStringLiteral("font-family:'%1';").arg(fontFamily);
-    }
-    if (isBold) {
-        fontExtraStyle += QStringLiteral("font-weight:bold;");
-    }
-    if (isItalic) {
-        fontExtraStyle += QStringLiteral("font-style:italic;");
+    m_chatPreviewDelegate->setFontFamily(fontFamily);
+    m_chatPreviewDelegate->setFontSize(qBound(8, m_spnChatFontSize->value(), 24));
+    m_chatPreviewDelegate->setFontBold(m_chkChatFontBold->isChecked());
+    m_chatPreviewDelegate->setFontItalic(m_chkChatFontItalic->isChecked());
+    m_chatPreviewDelegate->setLineSpacing(qBound(0, m_spnChatLineSpacing->value(), 20));
+
+    // Populate sample messages (only on first call)
+    if (m_chatPreviewModel->messageCount() == 0) {
+        UnifiedChatMessage m1;
+        m1.platform = PlatformId::YouTube;
+        m1.authorName = QStringLiteral("SampleUser");
+        m1.text = QStringLiteral("Hello, this is a YouTube message!");
+        m1.timestamp = QDateTime::fromString(QStringLiteral("2026-04-11 15:30:00"), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        m_chatPreviewModel->appendMessage(m1);
+
+        UnifiedChatMessage m2;
+        m2.platform = PlatformId::Chzzk;
+        m2.authorName = QString::fromUtf8("\xEC\xB9\x98\xEC\xA7\x80\xEC\xA7\x81\xEC\x8A\xA4\xED\x8A\xB8\xEB\xA6\xAC\xEB\xA8\xB8");
+        m2.text = QString::fromUtf8("\xEC\xB9\x98\xEC\xA7\x80\xEC\xA7\x81\xEC\x97\x90\xEC\x84\x9C \xEB\xB3\xB4\xEB\x82\xB8 \xEB\xA9\x94\xEC\x8B\x9C\xEC\xA7\x80\xEC\x9E\x85\xEB\x8B\x88\xEB\x8B\xA4.");
+        m2.timestamp = QDateTime::fromString(QStringLiteral("2026-04-11 15:30:05"), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        m_chatPreviewModel->appendMessage(m2);
+
+        UnifiedChatMessage m3;
+        m3.platform = PlatformId::YouTube;
+        m3.authorName = QString::fromUtf8("\xE3\x81\x95\xE3\x81\x8F\xE3\x82\x89");
+        m3.text = QString::fromUtf8("\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF\xEF\xBC\x81\xE9\x85\x8D\xE4\xBF\xA1\xE6\xA5\xBD\xE3\x81\x97\xE3\x81\xBF\xE3\x81\xAB\xE3\x81\x97\xE3\x81\xA6\xE3\x81\x84\xE3\x81\xBE\xE3\x81\x99\xE3\x80\x82");
+        m3.timestamp = QDateTime::fromString(QStringLiteral("2026-04-11 15:30:10"), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        m_chatPreviewModel->appendMessage(m3);
     }
 
-    struct SampleMsg {
-        bool isYouTube;
-        QString author;
-        QString text;
-        QString time;
-    };
-    const SampleMsg samples[] = {
-        { true,  QStringLiteral("SampleUser"),
-          QStringLiteral("Hello, this is a YouTube message!"),
-          QStringLiteral("2026-04-11 15:30:00") },
-        { false, QString::fromUtf8("\xEC\xB9\x98\xEC\xA7\x80\xEC\xA7\x81\xEC\x8A\xA4\xED\x8A\xB8\xEB\xA6\xAC\xEB\xA8\xB8"),
-          QString::fromUtf8("\xEC\xB9\x98\xEC\xA7\x80\xEC\xA7\x81\xEC\x97\x90\xEC\x84\x9C \xEB\xB3\xB4\xEB\x82\xB8 \xEB\xA9\x94\xEC\x8B\x9C\xEC\xA7\x80\xEC\x9E\x85\xEB\x8B\x88\xEB\x8B\xA4."),
-          QStringLiteral("2026-04-11 15:30:05") },
-        { true, QString::fromUtf8("\xE3\x81\x95\xE3\x81\x8F\xE3\x82\x89"),
-          QString::fromUtf8("\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF\xEF\xBC\x81\xE9\x85\x8D\xE4\xBF\xA1\xE6\xA5\xBD\xE3\x81\x97\xE3\x81\xBF\xE3\x81\xAB\xE3\x81\x97\xE3\x81\xA6\xE3\x81\x84\xE3\x81\xBE\xE3\x81\x99\xE3\x80\x82"),
-          QStringLiteral("2026-04-11 15:30:10") },
-    };
-
-    auto* containerLayout = new QVBoxLayout(m_chatPreviewContainer);
-    containerLayout->setContentsMargins(0, 0, 0, 0);
-    containerLayout->setSpacing(0);
-
-    for (const auto& msg : samples) {
-        const PlatformId plat = msg.isYouTube ? PlatformId::YouTube : PlatformId::Chzzk;
-        ChatBubbleParams params;
-        params.badgeText = PlatformTraits::badgeSymbol(plat);
-        params.badgeStyle = QStringLiteral("background:%1; color:%2; border-radius:%3px; font-weight:700; font-size:%4px;")
-                                .arg(PlatformTraits::badgeBgColor(plat), PlatformTraits::badgeFgColor(plat))
-                                .arg(badgeSize / 2).arg(badgeFontSize);
-        params.authorText = msg.author.toHtmlEscaped();
-        params.authorStyle = QStringLiteral("color:%1; font-weight:700; font-size:%2px;%3")
-                                 .arg(PlatformTraits::authorColor(plat)).arg(fontSize).arg(fontExtraStyle);
-        params.messageHtml = msg.text.toHtmlEscaped();
-        params.messageStyle = QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2")
-                                  .arg(fontSize).arg(fontExtraStyle);
-        params.timestampText = msg.time;
-        params.timestampStyle = QStringLiteral("color:#999999; font-size:%1px;%2")
-                                    .arg(timestampFontSize).arg(fontExtraStyle);
-        params.lineSpacing = lineSpacing;
-        params.badgeSize = badgeSize;
-
-        containerLayout->addWidget(buildChatBubble(params, m_chatPreviewContainer));
-    }
-    containerLayout->addStretch();
+    // Trigger repaint with updated delegate settings
+    m_chatPreviewList->viewport()->update();
 }
 
 QWidget* ConfigurationDialog::createYouTubeTab()

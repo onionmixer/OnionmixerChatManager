@@ -75,6 +75,9 @@ private:
     QSpinBox* m_spnChatLineSpacing = nullptr;
     QSpinBox* m_spnChatMaxMessages = nullptr;
     QWidget* m_chatPreviewContainer = nullptr;
+    class QListView* m_chatPreviewList = nullptr;
+    class ChatMessageModel* m_chatPreviewModel = nullptr;
+    class ChatBubbleDelegate* m_chatPreviewDelegate = nullptr;
     void updateChatPreview();
 
     QCheckBox* m_ytChkEnabled = nullptr;
