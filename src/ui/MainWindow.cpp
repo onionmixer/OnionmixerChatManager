@@ -25,6 +25,7 @@
 #include <QEvent>
 #include <QFrame>
 #include <QFormLayout>
+#include <QListView>
 #include <QGuiApplication>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -44,6 +45,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QShortcut>
+#include <QStackedWidget>
 #include <QSignalBlocker>
 #include <QStatusBar>
 #include <QStringList>
@@ -515,7 +517,7 @@ void MainWindow::setupUi()
     setupActionPanel(root);
 
     m_upperSplitter = new QSplitter(Qt::Horizontal, root);
-    m_upperSplitter->addWidget(m_tblChat);
+    m_upperSplitter->addWidget(m_chatStack);
     m_upperSplitter->addWidget(m_grpActionPanel);
     m_upperSplitter->setStretchFactor(0, 3);
     m_upperSplitter->setStretchFactor(1, 2);
@@ -611,21 +613,37 @@ QLayout* MainWindow::setupStatusBar(QWidget* root)
 
 void MainWindow::setupChatTable(QWidget* root)
 {
-    m_tblChat = new QTableWidget(root);
+    m_chatStack = new QStackedWidget(root);
+
+    // Messenger mode: QListView + model + delegate
+    m_chatListView = new QListView(m_chatStack);
+    m_chatListView->setModel(m_chatModel);
+    m_chatListView->setItemDelegate(m_chatDelegate);
+    m_chatListView->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_chatListView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_chatListView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_chatListView->setUniformItemSizes(false);
+    m_chatListView->setFrameShape(QFrame::NoFrame);
+    connect(m_chatListView->selectionModel(), &QItemSelectionModel::selectionChanged,
+        this, &MainWindow::onChatSelectionChanged);
+
+    // Table mode: existing QTableWidget
+    m_tblChat = new QTableWidget(m_chatStack);
     m_tblChat->setObjectName(QStringLiteral("tblUnifiedChat"));
     m_tblChat->verticalHeader()->setVisible(false);
     m_tblChat->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_tblChat->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tblChat->setSelectionMode(QAbstractItemView::SingleSelection);
-    configureChatTableForCurrentView();
     connect(m_tblChat, &QTableWidget::itemSelectionChanged, this, &MainWindow::onChatSelectionChanged);
-    auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_tblChat);
+
+    m_chatStack->addWidget(m_chatListView);  // index 0 = Messenger
+    m_chatStack->addWidget(m_tblChat);       // index 1 = Table
+
+    // Copy shortcut on stack (applies to both)
+    auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_chatStack);
     connect(copyShortcut, &QShortcut::activated, this, &MainWindow::onCopySelectedChat);
-    auto* copyAction = new QAction(m_tblChat);
-    copyAction->setObjectName(QStringLiteral("actCopySelectedChat"));
-    connect(copyAction, &QAction::triggered, this, &MainWindow::onCopySelectedChat);
-    m_tblChat->setContextMenuPolicy(Qt::ActionsContextMenu);
-    m_tblChat->addAction(copyAction);
+
+    configureChatTableForCurrentView();
 }
 
 void MainWindow::setupActionPanel(QWidget* root)
@@ -997,29 +1015,23 @@ void MainWindow::refreshChatViewToggleButton()
 
 void MainWindow::configureChatTableForCurrentView()
 {
-    if (!m_tblChat) {
+    if (!m_chatStack) {
         return;
     }
 
     if (m_chatViewMode == ChatViewMode::Messenger) {
-        m_tblChat->setColumnCount(1);
-        m_tblChat->setHorizontalHeaderLabels({ tr("Chat") });
-        m_tblChat->horizontalHeader()->setVisible(false);
-        m_tblChat->horizontalHeader()->setStretchLastSection(true);
-        m_tblChat->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-        m_tblChat->setWordWrap(true);
-        m_tblChat->setShowGrid(false);
-        m_tblChat->setFrameShape(QFrame::NoFrame);
-        m_tblChat->setStyleSheet(QStringLiteral(
-            "QTableWidget#tblUnifiedChat {"
-            " border: none;"
-            " gridline-color: transparent;"
-            "}"
-            "QTableWidget#tblUnifiedChat::item {"
-            " border: none;"
-            "}"));
+        m_chatStack->setCurrentWidget(m_chatListView);
+        if (m_chatDelegate) {
+            m_chatDelegate->setFontFamily(m_snapshot.chatFontFamily);
+            m_chatDelegate->setFontSize(m_snapshot.chatFontSize);
+            m_chatDelegate->setFontBold(m_snapshot.chatFontBold);
+            m_chatDelegate->setFontItalic(m_snapshot.chatFontItalic);
+            m_chatDelegate->setLineSpacing(m_snapshot.chatLineSpacing);
+        }
         return;
     }
+
+    m_chatStack->setCurrentWidget(m_tblChat);
 
     m_tblChat->setColumnCount(4);
     m_tblChat->setHorizontalHeaderLabels({ tr("Time"), tr("Platform"), tr("Author"), tr("Message") });
@@ -1236,17 +1248,19 @@ void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QStr
         const int keepCount = maxMessages * 4 / 5;
         m_chatMessages = m_chatMessages.mid(m_chatMessages.size() - keepCount);
         m_chatModel->trimOldest(keepCount);
-        rebuildChatTable();
-        m_tblChat->scrollToBottom();
-        updateActionPanel();
-        return;
+        if (m_chatViewMode == ChatViewMode::Table) {
+            rebuildChatTable();
+        }
     }
 
-    const int row = m_tblChat->rowCount();
-    m_tblChat->insertRow(row);
-    appendChatRow(row, message, authorLabel);
-
-    m_tblChat->scrollToBottom();
+    if (m_chatViewMode == ChatViewMode::Table) {
+        const int row = m_tblChat->rowCount();
+        m_tblChat->insertRow(row);
+        appendChatRow(row, message, authorLabel);
+        m_tblChat->scrollToBottom();
+    } else {
+        m_chatListView->scrollToBottom();
+    }
     updateActionPanel();
 }
 
@@ -1810,14 +1824,14 @@ const UnifiedChatMessage* MainWindow::selectedChatMessage() const
 
 int MainWindow::selectedChatRow() const
 {
-    if (!m_tblChat || !m_tblChat->selectionModel()) {
-        return -1;
+    if (m_chatViewMode == ChatViewMode::Messenger) {
+        if (!m_chatListView || !m_chatListView->selectionModel()) return -1;
+        const QModelIndexList sel = m_chatListView->selectionModel()->selectedIndexes();
+        return sel.isEmpty() ? -1 : sel.first().row();
     }
+    if (!m_tblChat || !m_tblChat->selectionModel()) return -1;
     const QModelIndexList rows = m_tblChat->selectionModel()->selectedRows();
-    if (rows.isEmpty()) {
-        return -1;
-    }
-    return rows.first().row();
+    return rows.isEmpty() ? -1 : rows.first().row();
 }
 
 void MainWindow::executeAction(const QString& actionId)
