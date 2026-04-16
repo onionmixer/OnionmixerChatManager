@@ -35,6 +35,12 @@ private:
     void setTransparentMode(bool transparent);
     void repositionViewerCountOverlay();
 
+    // Viewer count rendering (Phase 2: CenterLeft/CenterRight rotation support)
+    QString buildViewerCountText() const;
+    bool isRotatedViewerPosition() const;
+    void renderViewerCountLabel();
+    QPixmap renderViewerCountPixmap(const QString& text, bool rotated) const;
+
     QListView* m_listView = nullptr;
     ChatBubbleDelegate* m_delegate = nullptr;
     QLabel* m_viewerCountLabel = nullptr;
@@ -42,10 +48,16 @@ private:
     QPoint m_dragStartPos;
     bool m_dragging = false;
     bool m_suppressMoveEvent = false;
+    bool m_draggedDuringSuppress = false;
     QPoint m_lastUserPosition;
     QString m_viewerCountPosition = QStringLiteral("TopLeft");
     QColor m_transparentBgColor = QColor(0, 0, 0, 0);
     QColor m_opaqueBgColor = QColor(255, 255, 255, 255);
+
+    // Cached viewer counts for re-rendering on position change
+    int m_youtubeViewerCount = -1;
+    int m_chzzkViewerCount = -1;
+    bool m_viewerCountHasData = false;
 };
 
 #endif // BROADCAST_CHAT_WINDOW_H

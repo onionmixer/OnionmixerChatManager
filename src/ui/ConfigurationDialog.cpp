@@ -3,6 +3,7 @@
 #include "core/PlatformTraits.h"
 #include "ui/ChatBubbleDelegate.h"
 #include "ui/ChatMessageModel.h"
+#include "ui/ViewerCountStyle.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -1350,30 +1351,48 @@ void ConfigurationDialog::updateBroadcastPreview()
     const QString position = m_cmbBroadcastViewerPosition->currentText();
 
     auto drawViewerOverlay = [&](QPainter& painter, int pw, int ph) {
-        QFont overlayFont;
+        // Phase 1 Gap 20: QApplication::font() + Bold로 통일 (실제 방송창 QLabel 상속 폰트와 일치)
+        QFont overlayFont = QGuiApplication::font();
         overlayFont.setBold(true);
-        overlayFont.setPixelSize(12);
         painter.setFont(overlayFont);
         const QFontMetrics fm(overlayFont);
-        const int textW = fm.horizontalAdvance(viewerText) + 16;
-        const int textH = fm.height() + 8;
+        const int textW = fm.horizontalAdvance(viewerText) + ViewerCountStyle::kPaddingX * 2;
+        const int textH = fm.height() + ViewerCountStyle::kPaddingY * 2;
         const int margin = 8;
 
+        // Phase 2: CenterLeft/CenterRight는 90° CW 회전
+        const bool rotate = (position == QStringLiteral("CenterLeft")
+                             || position == QStringLiteral("CenterRight"));
+        const int bbW = rotate ? textH : textW;
+        const int bbH = rotate ? textW : textH;
+
         int ox = margin;
-        if (position.endsWith(QStringLiteral("Right")))       ox = pw - textW - margin;
-        else if (position.endsWith(QStringLiteral("Center"))) ox = (pw - textW) / 2;
+        if (position.endsWith(QStringLiteral("Right")))       ox = pw - bbW - margin;
+        else if (position.endsWith(QStringLiteral("Center"))) ox = (pw - bbW) / 2;
 
         int oy = margin;
-        if (position.startsWith(QStringLiteral("Bottom")))      oy = ph - textH - margin;
-        else if (position.startsWith(QStringLiteral("Center"))) oy = (ph - textH) / 2;
+        if (position.startsWith(QStringLiteral("Bottom")))      oy = ph - bbH - margin;
+        else if (position.startsWith(QStringLiteral("Center"))) oy = (ph - bbH) / 2;
 
+        painter.save();
         painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setBrush(QColor(0, 0, 0, 160));
-        painter.setPen(Qt::NoPen);
-        painter.drawRoundedRect(ox, oy, textW, textH, 4, 4);
-        painter.setPen(QColor(255, 255, 255));
-        painter.drawText(QRect(ox, oy, textW, textH), Qt::AlignCenter, viewerText);
-        painter.setRenderHint(QPainter::Antialiasing, false);
+        if (rotate) {
+            painter.translate(ox + bbW / 2.0, oy + bbH / 2.0);
+            painter.rotate(90);
+            painter.translate(-textW / 2.0, -textH / 2.0);
+            painter.setBrush(QColor::fromRgba(ViewerCountStyle::kBg));
+            painter.setPen(Qt::NoPen);
+            painter.drawRoundedRect(0, 0, textW, textH, ViewerCountStyle::kRadius, ViewerCountStyle::kRadius);
+            painter.setPen(QColor::fromRgb(ViewerCountStyle::kFg));
+            painter.drawText(QRect(0, 0, textW, textH), Qt::AlignCenter, viewerText);
+        } else {
+            painter.setBrush(QColor::fromRgba(ViewerCountStyle::kBg));
+            painter.setPen(Qt::NoPen);
+            painter.drawRoundedRect(ox, oy, textW, textH, ViewerCountStyle::kRadius, ViewerCountStyle::kRadius);
+            painter.setPen(QColor::fromRgb(ViewerCountStyle::kFg));
+            painter.drawText(QRect(ox, oy, textW, textH), Qt::AlignCenter, viewerText);
+        }
+        painter.restore();
     };
 
     // GroupBox의 내부 영역을 기준으로 비율 유지 스케일링

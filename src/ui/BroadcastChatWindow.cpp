@@ -3,14 +3,20 @@
 #include "core/PlatformTraits.h"
 #include "ui/ChatBubbleDelegate.h"
 #include "ui/ChatMessageModel.h"
+#include "ui/ViewerCountStyle.h"
 
 #include <QAbstractItemView>
+#include <QFont>
+#include <QFontMetrics>
+#include <QGuiApplication>
 #include <QLabel>
 #include <QListView>
 #include <QLocale>
 #include <QMouseEvent>
 #include <QMoveEvent>
 #include <QPainter>
+#include <QPixmap>
+#include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -70,6 +76,9 @@ bool BroadcastChatWindow::eventFilter(QObject* watched, QEvent* event)
         if (event->type() == QEvent::MouseMove) {
             auto* me = static_cast<QMouseEvent*>(event);
             if (m_dragging && (me->buttons() & Qt::LeftButton)) {
+                if (m_suppressMoveEvent) {
+                    m_draggedDuringSuppress = true;
+                }
                 move(me->globalPos() - m_dragStartPos);
                 return true;
             }
@@ -98,9 +107,8 @@ void BroadcastChatWindow::moveEvent(QMoveEvent* event)
 {
     QWidget::moveEvent(event);
     if (!m_suppressMoveEvent) {
-        m_lastUserPosition = pos();
-        const QPoint contentPos = geometry().topLeft();
-        emit windowMoved(contentPos.x(), contentPos.y());
+        m_lastUserPosition = geometry().topLeft();
+        emit windowMoved(m_lastUserPosition.x(), m_lastUserPosition.y());
     }
 }
 
@@ -109,6 +117,7 @@ void BroadcastChatWindow::setTransparentMode(bool transparent)
     m_transparentMode = transparent;
     const QSize savedSize = size();
 
+    m_draggedDuringSuppress = false;
     m_suppressMoveEvent = true;
 
     if (transparent) {
@@ -118,19 +127,27 @@ void BroadcastChatWindow::setTransparentMode(bool transparent)
         setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
         m_listView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     }
-    resize(savedSize);
-    move(m_lastUserPosition);
+    // Use setGeometry (not move) in both modes: Qt5/X11 retains stale frame margin
+    // cache across setWindowFlags, which makes move() place the native window offset
+    // by the old title-bar height. setGeometry sets crect directly, bypassing it.
+    setGeometry(m_lastUserPosition.x(), m_lastUserPosition.y(),
+                savedSize.width(), savedSize.height());
     show();
     update();
 
-    QTimer::singleShot(50, this, [this]() {
+    QTimer::singleShot(50, this, [this, savedPos = m_lastUserPosition, savedSize = size()]() {
+        if (m_transparentMode && !m_draggedDuringSuppress) {
+            setGeometry(savedPos.x(), savedPos.y(), savedSize.width(), savedSize.height());
+        }
         m_suppressMoveEvent = false;
+        m_draggedDuringSuppress = false;
     });
 }
 
 void BroadcastChatWindow::repositionViewerCountOverlay()
 {
-    if (!m_viewerCountLabel || m_viewerCountLabel->text().isEmpty()) return;
+    // Phase 2: text().isEmpty() 대신 m_viewerCountHasData 가드 (pixmap 상태에서 text().isEmpty() true 반환)
+    if (!m_viewerCountLabel || !m_viewerCountHasData) return;
     m_viewerCountLabel->adjustSize();
 
     const int margin = 8;
@@ -151,23 +168,91 @@ void BroadcastChatWindow::repositionViewerCountOverlay()
     m_viewerCountLabel->raise();
 }
 
-void BroadcastChatWindow::updateViewerCount(int youtubeCount, int chzzkCount)
+QString BroadcastChatWindow::buildViewerCountText() const
 {
     auto formatCount = [](int count) -> QString {
         return count >= 0 ? QLocale().toString(count) : QStringLiteral("\u2014");
     };
 
     QStringList parts;
-    parts << QStringLiteral("%1 %2").arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), formatCount(youtubeCount));
-    parts << QStringLiteral("%1 %2").arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk), formatCount(chzzkCount));
+    parts << QStringLiteral("%1 %2").arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), formatCount(m_youtubeViewerCount));
+    parts << QStringLiteral("%1 %2").arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk), formatCount(m_chzzkViewerCount));
 
     int total = 0;
     bool hasAny = false;
-    if (youtubeCount >= 0) { total += youtubeCount; hasAny = true; }
-    if (chzzkCount >= 0) { total += chzzkCount; hasAny = true; }
+    if (m_youtubeViewerCount >= 0) { total += m_youtubeViewerCount; hasAny = true; }
+    if (m_chzzkViewerCount >= 0) { total += m_chzzkViewerCount; hasAny = true; }
     parts << QStringLiteral("\u03A3 %1").arg(hasAny ? QLocale().toString(total) : QStringLiteral("\u2014"));
 
-    m_viewerCountLabel->setText(parts.join(QStringLiteral("  ")));
+    return parts.join(QStringLiteral("  "));
+}
+
+bool BroadcastChatWindow::isRotatedViewerPosition() const
+{
+    return m_viewerCountPosition == QStringLiteral("CenterLeft")
+        || m_viewerCountPosition == QStringLiteral("CenterRight");
+}
+
+QPixmap BroadcastChatWindow::renderViewerCountPixmap(const QString& text, bool rotated) const
+{
+    QFont font = QGuiApplication::font();
+    font.setBold(true);
+    const QFontMetrics fm(font);
+    const int textW = fm.horizontalAdvance(text) + ViewerCountStyle::kPaddingX * 2;
+    const int textH = fm.height() + ViewerCountStyle::kPaddingY * 2;
+
+    const int pmW = rotated ? textH : textW;
+    const int pmH = rotated ? textW : textH;
+
+    // High-DPI support
+    const qreal dpr = m_viewerCountLabel ? m_viewerCountLabel->devicePixelRatio() : 1.0;
+    QPixmap pm(static_cast<int>(pmW * dpr), static_cast<int>(pmH * dpr));
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(Qt::transparent);
+
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    if (rotated) {
+        // 90° CW rotation centered on pixmap
+        p.translate(pmW / 2.0, pmH / 2.0);
+        p.rotate(90);
+        p.translate(-textW / 2.0, -textH / 2.0);
+    }
+    p.setBrush(QColor::fromRgba(ViewerCountStyle::kBg));
+    p.setPen(Qt::NoPen);
+    p.drawRoundedRect(0, 0, textW, textH, ViewerCountStyle::kRadius, ViewerCountStyle::kRadius);
+    p.setPen(QColor::fromRgb(ViewerCountStyle::kFg));
+    p.setFont(font);
+    p.drawText(QRect(0, 0, textW, textH), Qt::AlignCenter, text);
+    p.end();
+    return pm;
+}
+
+void BroadcastChatWindow::renderViewerCountLabel()
+{
+    if (!m_viewerCountLabel) return;
+    const QString text = buildViewerCountText();
+    if (isRotatedViewerPosition()) {
+        // 회전: pixmap 기반 (CSS clear, text clear, pixmap 설정)
+        m_viewerCountLabel->setStyleSheet(QString());
+        m_viewerCountLabel->setText(QString());
+        m_viewerCountLabel->setPixmap(renderViewerCountPixmap(text, true));
+    } else {
+        // 비회전: 기존 CSS + text
+        m_viewerCountLabel->setStyleSheet(QStringLiteral(
+            "background: rgba(0,0,0,160); color: #ffffff; padding: 4px 8px; border-radius: 4px; font-weight: bold;"));
+        m_viewerCountLabel->setPixmap(QPixmap());  // pixmap 해제
+        m_viewerCountLabel->setText(text);
+    }
+    m_viewerCountLabel->adjustSize();
+}
+
+void BroadcastChatWindow::updateViewerCount(int youtubeCount, int chzzkCount)
+{
+    m_youtubeViewerCount = youtubeCount;
+    m_chzzkViewerCount = chzzkCount;
+    m_viewerCountHasData = true;
+    renderViewerCountLabel();
     m_viewerCountLabel->show();
     repositionViewerCountOverlay();
 }
@@ -188,6 +273,10 @@ void BroadcastChatWindow::applySettings(const AppSettingsSnapshot& snapshot)
     m_opaqueBgColor = opaqueCandidate.isValid() ? opaqueCandidate : QColor(255, 255, 255, 255);
 
     resize(snapshot.broadcastWindowWidth, snapshot.broadcastWindowHeight);
+    // Phase 2: 위치 변경 시 회전/비회전 전환 (pixmap↔text)
+    if (m_viewerCountHasData) {
+        renderViewerCountLabel();
+    }
     repositionViewerCountOverlay();
 
     if (m_listView) {

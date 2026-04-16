@@ -2573,14 +2573,13 @@ void MainWindow::onOpenBroadcast()
         m_broadcastWindow->applySettings(m_snapshot);
         m_broadcastWindow->updateViewerCount(m_youtubeViewerCount, m_chzzkViewerCount);
 
-        // 저장된 위치 복원 (-1이면 화면 중앙)
         if (m_snapshot.broadcastWindowX >= 0 && m_snapshot.broadcastWindowY >= 0) {
             m_broadcastWindow->move(m_snapshot.broadcastWindowX, m_snapshot.broadcastWindowY);
         } else {
             const QRect screenRect = QGuiApplication::primaryScreen()->availableGeometry();
-            m_broadcastWindow->move(
-                screenRect.x() + (screenRect.width() - m_broadcastWindow->width()) / 2,
-                screenRect.y() + (screenRect.height() - m_broadcastWindow->height()) / 2);
+            const int cx = screenRect.x() + (screenRect.width() - m_broadcastWindow->width()) / 2;
+            const int cy = screenRect.y() + (screenRect.height() - m_broadcastWindow->height()) / 2;
+            m_broadcastWindow->move(cx, cy);
         }
     }
     m_broadcastWindow->show();

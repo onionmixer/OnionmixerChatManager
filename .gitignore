@@ -10,6 +10,7 @@
 
 # Local report artifacts
 /report*
+report_*
 
 # Fix analysis documents
 FIX_*
@@ -22,6 +23,10 @@ UPDATE_*
 
 # Memo
 memo.txt
+
+# AI assistant instructions (local only)
+CLAUDE.md
+CODEX.md
 
 # External reference sources (submodule-incompatible repos)
 /etc/
