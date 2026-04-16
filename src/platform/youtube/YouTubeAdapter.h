@@ -25,6 +25,7 @@ public:
     void stop() override;
     bool isConnected() const override;
     QString currentLiveChatId() const;
+    QString currentVideoId() const;
     void applyRuntimeAccessToken(const QString& accessToken);
     bool sendMessage(const QString& text);
 

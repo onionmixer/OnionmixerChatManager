@@ -738,6 +738,11 @@ QString YouTubeAdapter::currentLiveChatId() const
     return m_liveChatId;
 }
 
+QString YouTubeAdapter::currentVideoId() const
+{
+    return m_discoveredVideoId;
+}
+
 void YouTubeAdapter::scheduleNextTick(int delayMs)
 {
     if (!m_running || !m_loopTimer) {

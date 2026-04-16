@@ -142,6 +142,9 @@ private:
     void refreshLiveBroadcastIndicator(PlatformId platform);
     void applyLiveBroadcastIndicatorStyle(QFrame* indicator, QLabel* label, PlatformId platform);
     bool isPlatformLiveOnline(PlatformId platform) const;
+    void requestYouTubeViewerCount();
+    void updateViewerCount(PlatformId platform, int count);
+    void refreshViewerCountDisplay();
     void syncYouTubeProfileFromAccessToken(const QString& accessToken);
     void syncChzzkProfileFromAccessToken(const QString& accessToken);
     QMap<PlatformId, bool> currentConnections() const;
@@ -165,6 +168,10 @@ private:
     QHash<PlatformId, LiveBroadcastState> m_liveStates;
     QHash<PlatformId, QString> m_liveStateDetails;
     QTimer* m_liveProbeTimer = nullptr;
+    QTimer* m_youtubeViewerCountTimer = nullptr;
+    bool m_awaitingYouTubeViewerCount = false;
+    int m_youtubeViewerCount = -1;
+    int m_chzzkViewerCount = -1;
     QTimer* m_apiStatusReconcileTimer = nullptr;
     QDateTime m_nextPeriodicChzzkProbeAtUtc;
     bool m_awaitingChzzkLiveProbe = false;
@@ -203,6 +210,9 @@ private:
     QFrame* m_boxChzzkLive = nullptr;
     QLabel* m_lblYouTubeLive = nullptr;
     QLabel* m_lblChzzkLive = nullptr;
+    QLabel* m_lblYouTubeViewers = nullptr;
+    QLabel* m_lblChzzkViewers = nullptr;
+    QLabel* m_lblTotalViewers = nullptr;
     QSplitter* m_mainSplitter = nullptr;
     QSplitter* m_upperSplitter = nullptr;
     QStackedWidget* m_chatStack = nullptr;

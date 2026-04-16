@@ -14,6 +14,7 @@ namespace Timings {
     constexpr int kChzzkSessionAuthTimeoutMs = 8000;
     constexpr int kChzzkConnectWatchdogMs = 12000;
     constexpr int kDiscoveryBackoffMaxMs = 15000;
+    constexpr int kYouTubeViewerCountIntervalMs = 15000;
     constexpr int kQuotaBackoffMs = 300000;
 }
 

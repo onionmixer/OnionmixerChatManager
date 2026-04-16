@@ -38,6 +38,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -693,6 +694,26 @@ void MainWindow::setupActionPanel(QWidget* root)
     liveIndicatorLayout->addWidget(m_lblChzzkLive);
     liveIndicatorLayout->addStretch();
     actionPanelLayout->addLayout(liveIndicatorLayout);
+
+    auto* viewerCountLayout = new QHBoxLayout;
+    const QString viewerBadgeStyle = QStringLiteral(
+        "background:%1; color:%2; padding:2px 6px; border-radius:3px; font-weight:bold;");
+    m_lblYouTubeViewers = new QLabel(
+        QStringLiteral("%1 \u2014").arg(PlatformTraits::badgeSymbol(PlatformId::YouTube)), m_grpActionPanel);
+    m_lblYouTubeViewers->setStyleSheet(viewerBadgeStyle
+        .arg(PlatformTraits::badgeBgColor(PlatformId::YouTube), PlatformTraits::badgeFgColor(PlatformId::YouTube)));
+    m_lblChzzkViewers = new QLabel(
+        QStringLiteral("%1 \u2014").arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk)), m_grpActionPanel);
+    m_lblChzzkViewers->setStyleSheet(viewerBadgeStyle
+        .arg(PlatformTraits::badgeBgColor(PlatformId::Chzzk), PlatformTraits::badgeFgColor(PlatformId::Chzzk)));
+    m_lblTotalViewers = new QLabel(QStringLiteral("\u03A3 \u2014"), m_grpActionPanel);
+    m_lblTotalViewers->setStyleSheet(QStringLiteral(
+        "background:#424242; color:#ffffff; padding:2px 6px; border-radius:3px; font-weight:bold;"));
+    viewerCountLayout->addWidget(m_lblYouTubeViewers);
+    viewerCountLayout->addWidget(m_lblChzzkViewers);
+    viewerCountLayout->addWidget(m_lblTotalViewers);
+    viewerCountLayout->addStretch();
+    actionPanelLayout->addLayout(viewerCountLayout);
 
     auto* selectedInfoLayout = new QFormLayout;
     m_lblSelectedPlatformCaption = new QLabel(m_grpActionPanel);
@@ -1966,6 +1987,11 @@ void MainWindow::initializeLiveProbe()
     m_liveProbeTimer->setInterval(BotManager::Timings::kLiveProbeIntervalMs);
     connect(m_liveProbeTimer, &QTimer::timeout, this, &MainWindow::onLiveProbeTimeout);
     m_liveProbeTimer->start();
+
+    m_youtubeViewerCountTimer = new QTimer(this);
+    m_youtubeViewerCountTimer->setInterval(BotManager::Timings::kYouTubeViewerCountIntervalMs);
+    connect(m_youtubeViewerCountTimer, &QTimer::timeout, this, &MainWindow::requestYouTubeViewerCount);
+
     onLiveProbeTimeout();
 }
 
@@ -2088,6 +2114,9 @@ void MainWindow::probeChzzkLiveStatus(const QString& accessToken)
                 || payload.value(QStringLiteral("live")).toBool();
         }
 
+        const int chzzkViewers = isLive ? content.value(QStringLiteral("concurrentUserCount")).toInt(-1) : -1;
+        updateViewerCount(PlatformId::Chzzk, chzzkViewers);
+
         if (isLive) {
             setLiveBroadcastState(PlatformId::Chzzk, LiveBroadcastState::ONLINE,
                 liveTitle.isEmpty() ? tr("Active broadcast detected") : liveTitle);
@@ -2111,6 +2140,22 @@ void MainWindow::setLiveBroadcastState(PlatformId platform, LiveBroadcastState s
     if (previous != state || previousDetail != detail) {
         m_txtEventLog->append(QStringLiteral("[LIVE] %1 state=%2 detail=%3")
                                   .arg(platformKey(platform), liveBroadcastStateText(state), detail));
+    }
+
+    if (platform == PlatformId::YouTube && m_youtubeViewerCountTimer) {
+        if (state == LiveBroadcastState::ONLINE) {
+            if (!m_youtubeViewerCountTimer->isActive()) {
+                m_youtubeViewerCountTimer->start();
+            }
+        } else {
+            if (m_youtubeViewerCountTimer->isActive()) {
+                m_youtubeViewerCountTimer->stop();
+            }
+            updateViewerCount(PlatformId::YouTube, -1);
+        }
+    }
+    if (platform == PlatformId::Chzzk && state != LiveBroadcastState::ONLINE) {
+        updateViewerCount(PlatformId::Chzzk, -1);
     }
 }
 
@@ -2399,5 +2444,92 @@ QMap<PlatformId, bool> MainWindow::currentConnections() const
         { PlatformId::YouTube, m_youtubeAdapter.isConnected() },
         { PlatformId::Chzzk, m_chzzkAdapter.isConnected() },
     };
+}
+
+void MainWindow::requestYouTubeViewerCount()
+{
+    if (m_awaitingYouTubeViewerCount) return;
+
+    const QString videoId = m_youtubeAdapter.currentVideoId().trimmed();
+    if (videoId.isEmpty()) {
+        updateViewerCount(PlatformId::YouTube, -1);
+        return;
+    }
+    TokenRecord record;
+    if (!m_tokenManager.readToken(PlatformId::YouTube, &record) || record.accessToken.trimmed().isEmpty()) {
+        return;
+    }
+
+    QUrl url(YouTube::Api::videos());
+    QUrlQuery query(url);
+    query.addQueryItem(QStringLiteral("part"), QStringLiteral("liveStreamingDetails"));
+    query.addQueryItem(QStringLiteral("id"), videoId);
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
+
+    QNetworkReply* reply = m_networkAccessManager.get(req);
+    if (!reply) return;
+    m_awaitingYouTubeViewerCount = true;
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        m_awaitingYouTubeViewerCount = false;
+
+        if (!m_youtubeViewerCountTimer || !m_youtubeViewerCountTimer->isActive()) {
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray body = reply->readAll();
+        QJsonObject obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (doc.isObject()) obj = doc.object();
+
+        int viewers = -1;
+        const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
+        if (!items.isEmpty()) {
+            const QJsonObject details = items.first().toObject()
+                .value(QStringLiteral("liveStreamingDetails")).toObject();
+            const QString cv = details.value(QStringLiteral("concurrentViewers")).toString();
+            if (!cv.isEmpty()) {
+                bool ok = false;
+                const int parsed = cv.toInt(&ok);
+                if (ok) viewers = parsed;
+            }
+        }
+        updateViewerCount(PlatformId::YouTube, viewers);
+        reply->deleteLater();
+    });
+}
+
+void MainWindow::updateViewerCount(PlatformId platform, int count)
+{
+    int& current = (platform == PlatformId::YouTube) ? m_youtubeViewerCount : m_chzzkViewerCount;
+    if (current == count) return;
+    current = count;
+    refreshViewerCountDisplay();
+}
+
+void MainWindow::refreshViewerCountDisplay()
+{
+    if (!m_lblYouTubeViewers || !m_lblChzzkViewers || !m_lblTotalViewers) return;
+
+    auto formatCount = [](int count) -> QString {
+        if (count < 0) return QStringLiteral("\u2014");
+        return QLocale().toString(count);
+    };
+
+    m_lblYouTubeViewers->setText(QStringLiteral("%1 %2")
+        .arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), formatCount(m_youtubeViewerCount)));
+    m_lblChzzkViewers->setText(QStringLiteral("%1 %2")
+        .arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk), formatCount(m_chzzkViewerCount)));
+
+    int total = 0;
+    bool hasAny = false;
+    if (m_youtubeViewerCount >= 0) { total += m_youtubeViewerCount; hasAny = true; }
+    if (m_chzzkViewerCount >= 0) { total += m_chzzkViewerCount; hasAny = true; }
+    m_lblTotalViewers->setText(QStringLiteral("\u03A3 %1").arg(
+        hasAny ? QLocale().toString(total) : QStringLiteral("\u2014")));
 }
 

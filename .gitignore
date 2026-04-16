@@ -17,5 +17,11 @@ FIX_*
 # Plan documents
 PLAN_*
 
+# Update documents
+UPDATE_*
+
+# Memo
+memo.txt
+
 # External reference sources (submodule-incompatible repos)
 /etc/
