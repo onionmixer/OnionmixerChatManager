@@ -1469,14 +1469,23 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
 
 void MainWindow::rebuildChatTable()
 {
-    if (!m_tblChat) {
+    configureChatTableForCurrentView();
+
+    if (m_chatViewMode == ChatViewMode::Messenger) {
+        // Model already holds data — just update delegate fonts via configureChatTableForCurrentView
+        if (m_chatListView) {
+            m_chatListView->viewport()->update();
+        }
+        updateActionPanel();
         return;
     }
 
+    if (!m_tblChat) {
+        return;
+    }
     const int previousRow = selectedChatRow();
     QSignalBlocker blocker(m_tblChat);
     m_tblChat->setRowCount(0);
-    configureChatTableForCurrentView();
     for (int i = 0; i < m_chatMessages.size(); ++i) {
         m_tblChat->insertRow(i);
         appendChatRow(i, m_chatMessages.at(i));
@@ -1675,7 +1684,7 @@ void MainWindow::onChatSelectionChanged()
 
 void MainWindow::onCopySelectedChat()
 {
-    if (!m_tblChat || !QGuiApplication::clipboard()) {
+    if (!QGuiApplication::clipboard()) {
         return;
     }
 
@@ -1685,17 +1694,24 @@ void MainWindow::onCopySelectedChat()
         return;
     }
 
-    QStringList cells;
-    cells.reserve(m_tblChat->columnCount());
-    for (int col = 0; col < m_tblChat->columnCount(); ++col) {
-        const QTableWidgetItem* item = m_tblChat->item(row, col);
-        QString value = item ? item->text() : QString();
-        if (value.isEmpty() && item) {
-            value = item->data(Qt::UserRole).toString();
+    QString copyText;
+    if (m_chatViewMode == ChatViewMode::Messenger) {
+        const QModelIndex idx = m_chatModel->index(row, 0);
+        copyText = idx.data(ChatMessageModel::CopyTextRole).toString();
+    } else {
+        QStringList cells;
+        cells.reserve(m_tblChat->columnCount());
+        for (int col = 0; col < m_tblChat->columnCount(); ++col) {
+            const QTableWidgetItem* item = m_tblChat->item(row, col);
+            QString value = item ? item->text() : QString();
+            if (value.isEmpty() && item) {
+                value = item->data(Qt::UserRole).toString();
+            }
+            cells.push_back(value);
         }
-        cells.push_back(value);
+        copyText = cells.join(QStringLiteral("\t"));
     }
-    QGuiApplication::clipboard()->setText(cells.join(QStringLiteral("\t")));
+    QGuiApplication::clipboard()->setText(copyText);
     statusBar()->showMessage(tr("Selected chat copied."), 1500);
 }
 
