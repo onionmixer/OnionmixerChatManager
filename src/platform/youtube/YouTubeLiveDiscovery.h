@@ -7,6 +7,7 @@
 #include <QNetworkRequest>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -25,8 +26,6 @@ public:
     void stop();
     void reset();
     void updateAccessToken(const QString& accessToken);
-
-    bool isRequestInFlight() const;
     void tick();
 
 signals:
@@ -36,7 +35,29 @@ signals:
     void requestTick(int delayMs);
 
 private:
-    // Placeholder — methods will be moved from YouTubeAdapter in subsequent steps
+    QNetworkRequest createBearerRequest(const QUrl& url) const;
+    QNetworkRequest createWebScrapingRequest(const QUrl& url) const;
+    int setupRequestGuard(QNetworkReply* reply);
+
+    int connectDiscoveryDelayMs() const;
+    bool isBootstrapDiscoveryPhase() const;
+    bool isThirdPartyChannel() const;
+    void emitLiveStateInfo(const QString& code, const QString& detail);
+    void emitLiveChatPendingInfoOnce(const QString& detail);
+
+    void requestOwnChannelProfile();
+    void requestActiveBroadcast();
+    void requestLiveByHandleWeb();
+    void requestRecentStreamByHandleWeb();
+    void requestLiveByChannelPageWeb();
+    void requestLiveByChannelEmbedWeb();
+    void requestPublicFeedForLiveChat();
+    void requestLiveByChannelSearch();
+    void requestMineUploadsPlaylistForLiveChat();
+    void requestPlaylistItemsForLiveChat(const QString& playlistId);
+    void requestRecentVideoDetailsForLiveChat(const QStringList& videoIds);
+    void requestVideoDetailsForLiveChat(const QString& videoId);
+
     QNetworkAccessManager* m_network = nullptr;
     int* m_requestInFlight = nullptr;
     int* m_generation = nullptr;
@@ -44,17 +65,19 @@ private:
     QString m_accessToken;
     QString m_channelId;
     QString m_channelHandle;
+    QString m_channelName;
     QString m_configuredChannelId;
     QString m_configuredChannelHandle;
     QString m_manualVideoIdOverride;
-    QString m_channelName;
 
+    bool m_running = false;
     int m_bootstrapDiscoverAttempts = 0;
     bool m_bootstrapSearchFallbackTried = false;
     QDateTime m_nextSearchFallbackAllowedAtUtc;
     QDateTime m_nextWebFallbackAllowedAtUtc;
     bool m_announcedLiveChatPending = false;
-    bool m_running = false;
+    QString m_lastLiveStateCode;
+    QString m_lastLiveStateDetail;
 };
 
 #endif // YOUTUBE_LIVE_DISCOVERY_H
