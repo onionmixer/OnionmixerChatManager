@@ -103,6 +103,8 @@ add_executable(BotManagerQt5
     src/ui/ConfigurationDialog.h
     src/config/AppSettings.cpp
     src/config/AppSettings.h
+    src/auth/TokenManager.cpp
+    src/auth/TokenManager.h
     src/auth/TokenVault.cpp
     src/auth/TokenVault.h
     src/auth/OAuthLocalServer.cpp

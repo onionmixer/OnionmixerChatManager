@@ -1,9 +1,7 @@
 #ifndef MAIN_WINDOW_H
 #define MAIN_WINDOW_H
 
-#include "auth/OAuthLocalServer.h"
-#include "auth/OAuthTokenClient.h"
-#include "auth/TokenVault.h"
+#include "auth/TokenManager.h"
 #include "config/AppSettings.h"
 #include "core/ActionExecutor.h"
 #include "core/ConnectionCoordinator.h"
@@ -52,16 +50,7 @@ private slots:
     void onResetChatterList();
 
     void onConfigApplyRequested(const AppSettingsSnapshot& snapshot);
-    void onTokenRefreshRequested(PlatformId platform, const PlatformSettings& settings);
-    void onInteractiveAuthRequested(PlatformId platform, const PlatformSettings& settings);
-    void onTokenDeleteRequested(PlatformId platform);
     void onPlatformConfigValidationRequested(PlatformId platform, const PlatformSettings& settings);
-    void onOAuthCallbackReceived(PlatformId platform, const QString& code, const QString& state, const QString& errorCode, const QString& errorDescription);
-    void onOAuthSessionFailed(PlatformId platform, const QString& reason);
-    void onTokenGranted(PlatformId platform, const QString& flow, const QString& accessToken, const QString& refreshToken, int expiresInSec, int refreshExpiresInSec);
-    void onTokenFailed(PlatformId platform, const QString& flow, const QString& errorCode, const QString& message, int httpStatus);
-    void onTokenRevoked(PlatformId platform, const QString& flow);
-    void onTokenRevokeFailed(PlatformId platform, const QString& flow, const QString& errorCode, const QString& message, int httpStatus);
 
     void onConnectionStateChanged(ConnectionState state);
     void onConnectProgress(PlatformId platform, const QString& phase);
@@ -121,10 +110,7 @@ private:
     void onMessageSent(PlatformId platform, bool ok, const QString& detail);
     void pushComposerHistory(const QString& text);
     void applyComposerHistoryText(const QString& text);
-    void refreshTokenUi(PlatformId platform);
-    void refreshAllTokenUi();
-    void tryStartupTokenRefresh();
-    void tryStartupTokenRefreshForPlatform(PlatformId platform);
+    void connectTokenManagerSignals();
     void refreshPlatformIndicators();
     void refreshPlatformIndicator(PlatformId platform);
     enum class PlatformVisualState {
@@ -155,21 +141,9 @@ private:
     void syncYouTubeProfileFromAccessToken(const QString& accessToken);
     void syncChzzkProfileFromAccessToken(const QString& accessToken);
     QMap<PlatformId, bool> currentConnections() const;
-    TokenState inferTokenState(const TokenRecord* record) const;
-    QUrl buildAuthorizationUrl(PlatformId platform, const PlatformSettings& settings, const QString& state, const QString& codeChallenge) const;
-    QString createOAuthState(PlatformId platform) const;
-    PlatformSettings settingsFor(PlatformId platform) const;
-    bool startTokenRefreshFlow(PlatformId platform, const PlatformSettings& settings, const TokenRecord& currentRecord);
-    bool startAuthCodeExchangeFlow(PlatformId platform, const PlatformSettings& settings, const QString& code, const QString& codeVerifier, const QString& authState);
-    void appendTokenAudit(PlatformId platform, const QString& action, bool ok, const QString& detail);
     AppSettingsSnapshot buildRuntimeConnectSnapshot(const AppSettingsSnapshot& base) const;
     void applyRuntimeAccessTokenToAdapter(PlatformId platform, const QString& accessToken);
 
-    struct PendingTokenFlowContext {
-        QString flow;
-        PlatformSettings settings;
-        TokenRecord previousRecord;
-    };
     struct PlatformRuntimeState {
         QString phase;
         QString lastErrorCode;
@@ -179,18 +153,10 @@ private:
 
     QString m_configDir;
     AppSettings m_settings;
-    FileTokenVault m_tokenVault;
-    OAuthLocalServer m_oauthLocalServer;
+    TokenManager m_tokenManager;
     QNetworkAccessManager m_networkAccessManager;
-    OAuthTokenClient m_oauthTokenClient;
     AppSettingsSnapshot m_snapshot;
     ActionExecutor m_actionExecutor;
-    QHash<PlatformId, QString> m_pendingOAuthState;
-    QHash<PlatformId, PlatformSettings> m_pendingOAuthSettings;
-    QHash<PlatformId, QString> m_pendingPkceVerifier;
-    QHash<PlatformId, PendingTokenFlowContext> m_pendingTokenFlows;
-    QHash<PlatformId, bool> m_pendingTokenRevokes;
-    QHash<PlatformId, bool> m_authInProgress;
     QHash<PlatformId, PlatformRuntimeState> m_platformRuntimeStates;
     QHash<PlatformId, LiveBroadcastState> m_liveStates;
     QHash<PlatformId, QString> m_liveStateDetails;
