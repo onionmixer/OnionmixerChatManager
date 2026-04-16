@@ -1,4 +1,5 @@
 #include "ui/ConfigurationDialog.h"
+#include "ui/ChatBubbleWidget.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -827,51 +828,27 @@ void ConfigurationDialog::updateChatPreview()
     containerLayout->setSpacing(0);
 
     for (const auto& msg : samples) {
-        auto* wrap = new QWidget(m_chatPreviewContainer);
-        auto* layout = new QVBoxLayout(wrap);
-        layout->setContentsMargins(8, lineSpacing, 8, lineSpacing);
-        layout->setSpacing(1);
-        layout->setAlignment(Qt::AlignTop);
-
-        auto* badge = new QLabel(wrap);
-        badge->setFixedSize(badgeSize, badgeSize);
-        badge->setAlignment(Qt::AlignCenter);
-        badge->setStyleSheet(msg.isYouTube
+        ChatBubbleParams params;
+        params.badgeText = msg.isYouTube ? QStringLiteral("\u25B6") : QStringLiteral("Z");
+        params.badgeStyle = msg.isYouTube
             ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
                   .arg(badgeSize / 2).arg(badgeFontSize)
             : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
-                  .arg(badgeSize / 2).arg(badgeFontSize));
-        badge->setText(msg.isYouTube ? QString::fromUtf8("\xE2\x96\xB6") : QStringLiteral("Z"));
-
-        auto* lblAuthor = new QLabel(msg.author.toHtmlEscaped(), wrap);
-        lblAuthor->setStyleSheet(msg.isYouTube
+                  .arg(badgeSize / 2).arg(badgeFontSize);
+        params.authorText = msg.author.toHtmlEscaped();
+        params.authorStyle = msg.isYouTube
             ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
-            : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle));
+            : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle);
+        params.messageHtml = msg.text.toHtmlEscaped();
+        params.messageStyle = QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2")
+                                  .arg(fontSize).arg(fontExtraStyle);
+        params.timestampText = msg.time;
+        params.timestampStyle = QStringLiteral("color:#999999; font-size:%1px;%2")
+                                    .arg(timestampFontSize).arg(fontExtraStyle);
+        params.lineSpacing = lineSpacing;
+        params.badgeSize = badgeSize;
 
-        auto* lblTimestamp = new QLabel(msg.time, wrap);
-        lblTimestamp->setStyleSheet(QStringLiteral("color:#999999; font-size:%1px;%2").arg(timestampFontSize).arg(fontExtraStyle));
-
-        auto* headLayout = new QHBoxLayout;
-        headLayout->setContentsMargins(0, 0, 0, 0);
-        headLayout->setSpacing(8);
-        headLayout->addWidget(badge, 0, Qt::AlignVCenter);
-        headLayout->addWidget(lblAuthor, 0, Qt::AlignVCenter);
-        headLayout->addWidget(lblTimestamp, 0, Qt::AlignVCenter);
-        headLayout->addStretch();
-
-        auto* lblMessage = new QLabel(msg.text.toHtmlEscaped(), wrap);
-        lblMessage->setWordWrap(true);
-        lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2").arg(fontSize).arg(fontExtraStyle));
-
-        auto* bodyLayout = new QHBoxLayout;
-        bodyLayout->setContentsMargins(0, 0, 0, 0);
-        bodyLayout->setSpacing(0);
-        bodyLayout->addSpacing(badgeSize + 8);
-        bodyLayout->addWidget(lblMessage, 1, Qt::AlignTop);
-
-        layout->addLayout(headLayout);
-        layout->addLayout(bodyLayout);
-        containerLayout->addWidget(wrap);
+        containerLayout->addWidget(buildChatBubble(params, m_chatPreviewContainer));
     }
     containerLayout->addStretch();
 }

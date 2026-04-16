@@ -97,6 +97,8 @@ add_executable(BotManagerQt5
     src/ui/MainWindow.h
     src/ui/ChatterListDialog.cpp
     src/ui/ChatterListDialog.h
+    src/ui/ChatBubbleWidget.cpp
+    src/ui/ChatBubbleWidget.h
     src/ui/ConfigurationDialog.cpp
     src/ui/ConfigurationDialog.h
     src/config/AppSettings.cpp
@@ -119,14 +121,16 @@ add_executable(BotManagerQt5
     src/platform/youtube/YouTubeAdapter.h
     src/platform/youtube/YouTubeChatMessageParser.cpp
     src/platform/youtube/YouTubeChatMessageParser.h
-    src/platform/youtube/EmojiImageCache.cpp
-    src/platform/youtube/EmojiImageCache.h
+    src/core/EmojiImageCache.cpp
+    src/core/EmojiImageCache.h
     src/platform/youtube/YouTubeLiveChatWebClient.cpp
     src/platform/youtube/YouTubeLiveChatWebClient.h
     src/platform/youtube/YouTubeStreamListClient.cpp
     src/platform/youtube/YouTubeStreamListClient.h
     src/platform/chzzk/ChzzkAdapter.cpp
     src/platform/chzzk/ChzzkAdapter.h
+    src/platform/chzzk/ChzzkEmojiResolver.cpp
+    src/platform/chzzk/ChzzkEmojiResolver.h
     ${BOTMANAGER_YT_STREAMLIST_GENERATED_SRCS}
 )
 

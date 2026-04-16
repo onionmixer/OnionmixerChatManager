@@ -7,6 +7,7 @@
 #include <QSet>
 #include <QUrl>
 
+class ChzzkEmojiResolver;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
@@ -64,6 +65,7 @@ private:
     bool m_announcedChatReady = false;
     QSet<QString> m_seenMessageIds;
     QTimer* m_heartbeatTimer = nullptr;
+    ChzzkEmojiResolver* m_emojiResolver = nullptr;
 };
 
 #endif // CHZZK_ADAPTER_H

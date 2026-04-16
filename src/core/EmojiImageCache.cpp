@@ -1,4 +1,4 @@
-#include "platform/youtube/EmojiImageCache.h"
+#include "core/EmojiImageCache.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>

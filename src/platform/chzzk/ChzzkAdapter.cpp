@@ -1,4 +1,5 @@
 #include "platform/chzzk/ChzzkAdapter.h"
+#include "platform/chzzk/ChzzkEmojiResolver.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -8,6 +9,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QTimer>
 #include <QUrlQuery>
@@ -92,6 +94,7 @@ ChzzkAdapter::ChzzkAdapter(QObject* parent)
     : IChatPlatformAdapter(parent)
 {
     m_network = new QNetworkAccessManager(this);
+    m_emojiResolver = new ChzzkEmojiResolver(m_network, this);
     m_connectWatchdog = new QTimer(this);
     m_connectWatchdog->setSingleShot(true);
     connect(m_connectWatchdog, &QTimer::timeout, this, [this]() {
@@ -192,6 +195,9 @@ void ChzzkAdapter::start(const PlatformSettings& settings)
     m_subscribeSessionKey.clear();
     m_subscribeRecoverCount = 0;
     resetProgressAnnouncements();
+    if (!m_channelId.isEmpty()) {
+        m_emojiResolver->loadEmojiPacks(m_channelId);
+    }
     if (m_connectWatchdog) {
         m_connectWatchdog->start(12000);
     }
@@ -803,6 +809,43 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
         if (msg.text.trimmed().isEmpty()) {
             return;
         }
+
+        // Parse {:emojiId:} patterns and build richText + emojis
+        {
+            static const QRegularExpression reEmoji(QStringLiteral("\\{:([A-Za-z0-9_-]+):\\}"));
+            const QString& text = msg.text;
+            QString richText;
+            QVector<ChatEmojiInfo> emojiList;
+            int offset = 0;
+            auto it = reEmoji.globalMatch(text);
+            while (it.hasNext()) {
+                const auto match = it.next();
+                richText += text.mid(offset, match.capturedStart() - offset).toHtmlEscaped();
+                offset = match.capturedEnd();
+
+                const QString emojiId = match.captured(1);
+                const QString imageUrl = m_emojiResolver->imageUrlForId(emojiId);
+
+                if (!imageUrl.isEmpty()) {
+                    richText += QStringLiteral("<img src='emoji://%1' width='24' height='24' alt='{:%1:}'/>")
+                                    .arg(emojiId);
+                    ChatEmojiInfo info;
+                    info.emojiId = emojiId;
+                    info.imageUrl = imageUrl;
+                    info.fallbackText = QStringLiteral("{:%1:}").arg(emojiId);
+                    emojiList.append(info);
+                } else {
+                    richText += match.captured(0).toHtmlEscaped();
+                }
+            }
+            richText += text.mid(offset).toHtmlEscaped();
+
+            if (!emojiList.isEmpty()) {
+                msg.richText = richText;
+                msg.emojis = emojiList;
+            }
+        }
+
         const QString msgId = msg.messageId.trimmed();
         if (!msgId.isEmpty()) {
             if (m_seenMessageIds.contains(msgId)) {

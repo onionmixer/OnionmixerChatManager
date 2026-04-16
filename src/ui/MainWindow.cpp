@@ -1,8 +1,9 @@
 #include "ui/MainWindow.h"
 
 #include "auth/PkceUtil.h"
-#include "platform/youtube/EmojiImageCache.h"
+#include "core/EmojiImageCache.h"
 #include "i18n/AppLanguage.h"
+#include "ui/ChatBubbleWidget.h"
 #include "ui/ConfigurationDialog.h"
 
 #include <algorithm>
@@ -1832,101 +1833,56 @@ QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message,
         fontExtraStyle += QStringLiteral("font-style:italic;");
     }
 
-    auto* wrap = new QWidget(m_tblChat);
-    wrap->setObjectName(QStringLiteral("chatBubbleWrap"));
-    wrap->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    wrap->setFocusPolicy(Qt::NoFocus);
+    const bool isYouTube = (message.platform == PlatformId::YouTube);
 
-    auto* layout = new QVBoxLayout(wrap);
-    layout->setContentsMargins(8, lineSpacing, 8, lineSpacing);
-    layout->setSpacing(1);
-    layout->setAlignment(Qt::AlignTop);
-
-    auto* badge = new QLabel(wrap);
-    badge->setFixedSize(badgeSize, badgeSize);
-    badge->setAlignment(Qt::AlignCenter);
-    badge->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    badge->setFocusPolicy(Qt::NoFocus);
-    badge->setStyleSheet(message.platform == PlatformId::YouTube
-            ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
-                  .arg(badgeSize / 2).arg(badgeFontSize)
-            : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
-                  .arg(badgeSize / 2).arg(badgeFontSize));
-    badge->setText(message.platform == PlatformId::YouTube ? QStringLiteral("▶") : QStringLiteral("Z"));
-    auto* badgeWrap = new QWidget(wrap);
-    auto* badgeWrapLayout = new QVBoxLayout(badgeWrap);
-    badgeWrapLayout->setContentsMargins(0, 1, 0, 0);
-    badgeWrapLayout->setSpacing(0);
-    badgeWrapLayout->addWidget(badge, 0, Qt::AlignTop);
-
-    auto* lblAuthor = new QLabel(authorDisplay.toHtmlEscaped(), wrap);
-    lblAuthor->setTextFormat(Qt::RichText);
-    lblAuthor->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    lblAuthor->setFocusPolicy(Qt::NoFocus);
-    lblAuthor->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    lblAuthor->setStyleSheet(message.platform == PlatformId::YouTube
-            ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
-            : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle));
-
-    auto* lblMessage = new QLabel(wrap);
-    lblMessage->setTextFormat(Qt::RichText);
-    lblMessage->setTextInteractionFlags(Qt::NoTextInteraction);
-    lblMessage->setWordWrap(true);
-    lblMessage->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    lblMessage->setFocusPolicy(Qt::NoFocus);
-    lblMessage->setStyleSheet(QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2").arg(fontSize).arg(fontExtraStyle));
-    {
-        QString html = message.richText.isEmpty()
-            ? message.text.toHtmlEscaped()
-            : message.richText;
-        for (const ChatEmojiInfo& emo : message.emojis) {
-            const QString placeholder = QStringLiteral("emoji://%1").arg(emo.emojiId);
-            if (m_emojiCache && m_emojiCache->contains(emo.emojiId)) {
-                const QPixmap pix = m_emojiCache->get(emo.emojiId);
-                QByteArray ba;
-                QBuffer buf(&ba);
-                buf.open(QIODevice::WriteOnly);
-                pix.save(&buf, "PNG");
-                html.replace(placeholder,
-                    QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(ba.toBase64())));
-            } else {
-                if (m_emojiCache) {
-                    m_emojiCache->ensureLoaded(emo.emojiId, emo.imageUrl);
-                }
-                html.replace(
-                    QStringLiteral("<img src='%1' width='24' height='24' alt='%2'/>")
-                        .arg(placeholder, emo.fallbackText.toHtmlEscaped()),
-                    emo.fallbackText.toHtmlEscaped());
+    // Emoji replacement
+    QString messageHtml = message.richText.isEmpty()
+        ? message.text.toHtmlEscaped()
+        : message.richText;
+    for (const ChatEmojiInfo& emo : message.emojis) {
+        const QString placeholder = QStringLiteral("emoji://%1").arg(emo.emojiId);
+        if (m_emojiCache && m_emojiCache->contains(emo.emojiId)) {
+            const QPixmap pix = m_emojiCache->get(emo.emojiId);
+            QByteArray ba;
+            QBuffer buf(&ba);
+            buf.open(QIODevice::WriteOnly);
+            pix.save(&buf, "PNG");
+            messageHtml.replace(placeholder,
+                QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(ba.toBase64())));
+        } else {
+            if (m_emojiCache) {
+                m_emojiCache->ensureLoaded(emo.emojiId, emo.imageUrl);
             }
+            messageHtml.replace(
+                QStringLiteral("<img src='%1' width='24' height='24' alt='%2'/>")
+                    .arg(placeholder, emo.fallbackText.toHtmlEscaped()),
+                emo.fallbackText.toHtmlEscaped());
         }
-        lblMessage->setText(html);
     }
 
-    const QString timestampText = message.timestamp.isValid()
+    ChatBubbleParams params;
+    params.badgeText = isYouTube ? QStringLiteral("\u25B6") : QStringLiteral("Z");
+    params.badgeStyle = isYouTube
+        ? QStringLiteral("background:#E53935; color:#ffffff; border-radius:%1px; font-weight:700; font-size:%2px;")
+              .arg(badgeSize / 2).arg(badgeFontSize)
+        : QStringLiteral("background:#16C784; color:#101010; border-radius:%1px; font-weight:700; font-size:%2px;")
+              .arg(badgeSize / 2).arg(badgeFontSize);
+    params.authorText = authorDisplay.toHtmlEscaped();
+    params.authorStyle = isYouTube
+        ? QStringLiteral("color:#6A3FA0; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle)
+        : QStringLiteral("color:#D17A00; font-weight:700; font-size:%1px;%2").arg(fontSize).arg(fontExtraStyle);
+    params.messageHtml = messageHtml;
+    params.messageStyle = QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2")
+                              .arg(fontSize).arg(fontExtraStyle);
+    params.timestampText = message.timestamp.isValid()
         ? message.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
         : QString();
-    auto* lblTimestamp = new QLabel(timestampText, wrap);
-    lblTimestamp->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    lblTimestamp->setFocusPolicy(Qt::NoFocus);
-    lblTimestamp->setStyleSheet(QStringLiteral("color:#999999; font-size:%1px;%2").arg(timestampFontSize).arg(fontExtraStyle));
+    params.timestampStyle = QStringLiteral("color:#999999; font-size:%1px;%2")
+                                .arg(timestampFontSize).arg(fontExtraStyle);
+    params.lineSpacing = lineSpacing;
+    params.badgeSize = badgeSize;
 
-    auto* headLayout = new QHBoxLayout;
-    headLayout->setContentsMargins(0, 0, 0, 0);
-    headLayout->setSpacing(8);
-    headLayout->addWidget(badgeWrap, 0, Qt::AlignVCenter);
-    headLayout->addWidget(lblAuthor, 0, Qt::AlignVCenter);
-    headLayout->addWidget(lblTimestamp, 0, Qt::AlignVCenter);
-    headLayout->addStretch();
-
-    auto* bodyLayout = new QHBoxLayout;
-    bodyLayout->setContentsMargins(0, 0, 0, 0);
-    bodyLayout->setSpacing(0);
-    bodyLayout->addSpacing(badgeSize + 8);
-    bodyLayout->addWidget(lblMessage, 1, Qt::AlignTop);
-
-    layout->addLayout(headLayout);
-    layout->addLayout(bodyLayout);
-    return wrap;
+    return buildChatBubble(params, m_tblChat);
 }
 
 void MainWindow::rebuildChatTable()
