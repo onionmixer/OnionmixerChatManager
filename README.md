@@ -207,6 +207,10 @@ account_label=
 2. `liveChatMessages.streamList`
 3. `liveChatMessages.list`
 
+InnerTube WebChat 참고:
+- `INNERTUBE_API_KEY`는 실행 시 YouTube live chat 페이지에서 추출합니다.
+- 이 값은 저장소의 소스/설정 파일에 하드코딩하거나 커밋하지 마십시오.
+
 수동 우회:
 - `live_video_id_override`에 watch URL 또는 raw `videoId`를 넣으면 자동 탐색보다 우선 사용합니다.
 

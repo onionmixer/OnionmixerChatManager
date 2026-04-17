@@ -15,7 +15,6 @@
 #include <QUrlQuery>
 
 namespace {
-const QString kDefaultInnertubeApiKey = QString();
 const QString kDefaultClientVersion = QStringLiteral("2.20260206.01.00");
 const int kDefaultPollIntervalMs = 3000;
 const int kMinPollIntervalMs = 1000;
@@ -65,7 +64,7 @@ void YouTubeLiveChatWebClient::start(const QString& videoId)
 
     m_videoId = trimmed;
     m_continuationToken.clear();
-    m_innertubeApiKey = kDefaultInnertubeApiKey;
+    m_innertubeApiKey.clear();
     m_clientVersion = kDefaultClientVersion;
     m_consecutiveEmptyCount = 0;
     ++m_generation;
@@ -153,6 +152,12 @@ void YouTubeLiveChatWebClient::handleInitialPageResponse(QNetworkReply* reply)
     const QString apiKey = extractInnertubeApiKey(html);
     if (!apiKey.isEmpty()) {
         m_innertubeApiKey = apiKey;
+    }
+    if (m_innertubeApiKey.isEmpty()) {
+        emit failed(QStringLiteral("YT_WEBCHAT_NO_API_KEY"),
+            QStringLiteral("Could not extract INNERTUBE_API_KEY from live_chat page."));
+        m_running = false;
+        return;
     }
     const QString clientVersion = extractClientVersion(html);
     if (!clientVersion.isEmpty()) {
