@@ -3,6 +3,7 @@
 
 #include "core/AppTypes.h"
 
+#include <QColor>
 #include <QStyledItemDelegate>
 
 class EmojiImageCache;
@@ -24,6 +25,12 @@ public:
     void setLineSpacing(int spacing);
     void setEmojiCache(EmojiImageCache* cache);
 
+    // 방송창 전용 스타일 확장 (invalid QColor() = off, 기본값)
+    void setBodyOverrideColor(const QColor& c);
+    void setTextOutlineColor(const QColor& c);
+    QColor bodyOverrideColor() const { return m_bodyOverrideColor; }
+    QColor textOutlineColor() const { return m_textOutlineColor; }
+
 private:
     int badgeSize() const;
     int badgeFontSize() const;
@@ -38,6 +45,8 @@ private:
     bool m_fontItalic = false;
     int m_lineSpacing = 3;
     EmojiImageCache* m_emojiCache = nullptr;
+    QColor m_bodyOverrideColor;  // invalid = off
+    QColor m_textOutlineColor;   // invalid = off
 };
 
 #endif // CHAT_BUBBLE_DELEGATE_H

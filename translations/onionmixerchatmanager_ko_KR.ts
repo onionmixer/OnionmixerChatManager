@@ -545,6 +545,30 @@ copied_at_local: %2
         <source>Opaque Background</source>
         <translation>불투명 배경</translation>
     </message>
+    <message>
+        <source>Not set</source>
+        <translation>설정되지 않음</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>지움</translation>
+    </message>
+    <message>
+        <source>Chat Body Font Color</source>
+        <translation>채팅 본문 색상</translation>
+    </message>
+    <message>
+        <source>Chat Text Outline Color</source>
+        <translation>채팅 윤곽선 색상</translation>
+    </message>
+    <message>
+        <source>Transparent Preview</source>
+        <translation>투명 프리뷰</translation>
+    </message>
+    <message>
+        <source>Opaque Preview</source>
+        <translation>불투명 프리뷰</translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>

@@ -61,6 +61,9 @@ struct AppSettingsSnapshot {
     int broadcastWindowHeight = 600;
     QString broadcastTransparentBgColor = QStringLiteral("#00000000");
     QString broadcastOpaqueBgColor = QStringLiteral("#FFFFFFFF");
+    // 방송창 전용 — 빈 문자열 = off (기본). "#AARRGGBB" 포맷.
+    QString broadcastChatBodyFontColor;
+    QString broadcastChatOutlineColor;
 
     QDateTime loadedAtUtc;
 };

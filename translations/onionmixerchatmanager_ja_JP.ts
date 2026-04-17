@@ -545,6 +545,30 @@ copied_at_local: %2
         <source>Opaque Background</source>
         <translation>不透明背景</translation>
     </message>
+    <message>
+        <source>Not set</source>
+        <translation>未設定</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>クリア</translation>
+    </message>
+    <message>
+        <source>Chat Body Font Color</source>
+        <translation>チャット本文フォント色</translation>
+    </message>
+    <message>
+        <source>Chat Text Outline Color</source>
+        <translation>チャット文字アウトライン色</translation>
+    </message>
+    <message>
+        <source>Transparent Preview</source>
+        <translation>透明プレビュー</translation>
+    </message>
+    <message>
+        <source>Opaque Preview</source>
+        <translation>不透明プレビュー</translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>

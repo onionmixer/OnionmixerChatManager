@@ -159,6 +159,8 @@ AppSettingsSnapshot AppSettings::load() const
     snapshot.broadcastWindowHeight = s.value(QStringLiteral("window_height"), 600).toInt();
     snapshot.broadcastTransparentBgColor = s.value(QStringLiteral("transparent_bg_color"), QStringLiteral("#00000000")).toString();
     snapshot.broadcastOpaqueBgColor = s.value(QStringLiteral("opaque_bg_color"), QStringLiteral("#FFFFFFFF")).toString();
+    snapshot.broadcastChatBodyFontColor = s.value(QStringLiteral("chat_body_font_color"), QString()).toString();
+    snapshot.broadcastChatOutlineColor = s.value(QStringLiteral("chat_outline_color"), QString()).toString();
     s.endGroup();
 
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();
@@ -194,6 +196,8 @@ bool AppSettings::save(const AppSettingsSnapshot& snapshot) const
     s.setValue(QStringLiteral("window_height"), snapshot.broadcastWindowHeight);
     s.setValue(QStringLiteral("transparent_bg_color"), snapshot.broadcastTransparentBgColor);
     s.setValue(QStringLiteral("opaque_bg_color"), snapshot.broadcastOpaqueBgColor);
+    s.setValue(QStringLiteral("chat_body_font_color"), snapshot.broadcastChatBodyFontColor);
+    s.setValue(QStringLiteral("chat_outline_color"), snapshot.broadcastChatOutlineColor);
     s.endGroup();
 
     s.sync();

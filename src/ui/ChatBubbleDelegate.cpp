@@ -6,7 +6,57 @@
 #include <QApplication>
 #include <QBuffer>
 #include <QPainter>
+#include <QPainterPath>
+#include <QTextBlock>
 #include <QTextDocument>
+#include <QTextFragment>
+#include <QTextLayout>
+
+namespace {
+constexpr qreal kOutlineWidthPx = 1.5;
+
+// 텍스트 한 문자열에 대해 stroke outline을 그린다 (drawText 이전에 호출)
+void strokeTextAt(QPainter* p, const QColor& color, const QString& text,
+                  const QFont& font, const QPointF& baseline)
+{
+    if (!color.isValid() || text.isEmpty()) return;
+    QPainterPath path;
+    path.addText(baseline, font, text);
+    const QPen pen(color, kOutlineWidthPx, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    p->setBrush(Qt::NoBrush);
+    p->strokePath(path, pen);
+}
+
+// QTextDocument 본문 중 텍스트 fragment만 찾아 각 line별로 outline을 그린다.
+// QTextLayout::glyphRuns 기반으로 이모지 이미지는 skip.
+void strokeBodyTextFragments(QTextDocument* doc, QPainter* p, const QColor& outlineColor)
+{
+    if (!doc || !outlineColor.isValid()) return;
+    const QPen pen(outlineColor, kOutlineWidthPx, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    p->setBrush(Qt::NoBrush);
+
+    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
+        QTextLayout* layout = block.layout();
+        if (!layout) continue;
+        for (int i = 0, n = layout->lineCount(); i < n; ++i) {
+            const QTextLine line = layout->lineAt(i);
+            const QList<QGlyphRun> runs = line.glyphRuns();
+            for (const QGlyphRun& run : runs) {
+                QPainterPath path;
+                const QRawFont& rawFont = run.rawFont();
+                const QVector<quint32> indexes = run.glyphIndexes();
+                const QVector<QPointF> positions = run.positions();
+                const QPointF runPos = layout->position();
+                for (int g = 0; g < indexes.size() && g < positions.size(); ++g) {
+                    const QPainterPath glyphPath = rawFont.pathForGlyph(indexes[g]);
+                    path.addPath(glyphPath.translated(runPos + positions[g]));
+                }
+                p->strokePath(path, pen);
+            }
+        }
+    }
+}
+} // namespace
 
 ChatBubbleDelegate::ChatBubbleDelegate(QObject* parent)
     : QStyledItemDelegate(parent)
@@ -53,6 +103,8 @@ void ChatBubbleDelegate::setFontBold(bool bold) { m_fontBold = bold; }
 void ChatBubbleDelegate::setFontItalic(bool italic) { m_fontItalic = italic; }
 void ChatBubbleDelegate::setLineSpacing(int spacing) { m_lineSpacing = qBound(0, spacing, 20); }
 void ChatBubbleDelegate::setEmojiCache(EmojiImageCache* cache) { m_emojiCache = cache; }
+void ChatBubbleDelegate::setBodyOverrideColor(const QColor& c) { m_bodyOverrideColor = c; }
+void ChatBubbleDelegate::setTextOutlineColor(const QColor& c) { m_textOutlineColor = c; }
 
 void ChatBubbleDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
                                 const QModelIndex& index) const
@@ -98,19 +150,32 @@ void ChatBubbleDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
     const int headerLeft = contentRect.left() + bs + 8;
     const QFont af = authorFont();
     painter->setFont(af);
-    painter->setPen(QColor(PlatformTraits::authorColor(platform)));
     const QFontMetrics afm(af);
     const QRect authorRect(headerLeft, contentRect.top(), afm.horizontalAdvance(authorName) + 4, afm.height());
+    // Outline (stroke) first, then fill — 순서를 지켜야 fill이 inside를 덮음 (§2)
+    if (m_textOutlineColor.isValid()) {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        const qreal baseY = authorRect.top() + (authorRect.height() + afm.ascent() - afm.descent()) / 2.0;
+        strokeTextAt(painter, m_textOutlineColor, authorName, af,
+                     QPointF(authorRect.left(), baseY));
+    }
+    painter->setPen(QColor(PlatformTraits::authorColor(platform)));
     painter->drawText(authorRect, Qt::AlignVCenter, authorName);
 
     // ── Timestamp ──
     const QFont tf = timestampFont();
     painter->setFont(tf);
-    painter->setPen(QColor(QStringLiteral("#999999")));
     const QString tsText = timestamp.isValid() ? timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : QString();
     if (!tsText.isEmpty()) {
         const QFontMetrics tfm(tf);
         const QRect tsRect(authorRect.right() + 8, contentRect.top(), tfm.horizontalAdvance(tsText) + 4, tfm.height());
+        if (m_textOutlineColor.isValid()) {
+            painter->setRenderHint(QPainter::Antialiasing, true);
+            const qreal baseY = tsRect.top() + (tsRect.height() + tfm.ascent() - tfm.descent()) / 2.0;
+            strokeTextAt(painter, m_textOutlineColor, tsText, tf,
+                         QPointF(tsRect.left(), baseY));
+        }
+        painter->setPen(QColor(QStringLiteral("#999999")));
         painter->drawText(tsRect, Qt::AlignVCenter, tsText);
     }
 
@@ -129,7 +194,16 @@ void ChatBubbleDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
     doc.setHtml(html);
 
     painter->translate(bodyLeft, bodyTop);
-    painter->setPen(QColor(QStringLiteral("#111111")));
+    // 본문 outline (stroke first, fill after — §2)
+    if (m_textOutlineColor.isValid()) {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        strokeBodyTextFragments(&doc, painter, m_textOutlineColor);
+    }
+    // 본문 색: override 우선, 없으면 기본 #111111
+    const QColor bodyColor = m_bodyOverrideColor.isValid()
+                           ? m_bodyOverrideColor
+                           : QColor(QStringLiteral("#111111"));
+    painter->setPen(bodyColor);
     doc.drawContents(painter);
     painter->translate(-bodyLeft, -bodyTop);
 

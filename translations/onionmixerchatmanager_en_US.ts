@@ -533,6 +533,30 @@ copied_at_local: %2
         <source>Opaque Background</source>
         <translation>Opaque Background</translation>
     </message>
+    <message>
+        <source>Not set</source>
+        <translation>Not set</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>Clear</translation>
+    </message>
+    <message>
+        <source>Chat Body Font Color</source>
+        <translation>Chat Body Font Color</translation>
+    </message>
+    <message>
+        <source>Chat Text Outline Color</source>
+        <translation>Chat Text Outline Color</translation>
+    </message>
+    <message>
+        <source>Transparent Preview</source>
+        <translation>Transparent Preview</translation>
+    </message>
+    <message>
+        <source>Opaque Preview</source>
+        <translation>Opaque Preview</translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>

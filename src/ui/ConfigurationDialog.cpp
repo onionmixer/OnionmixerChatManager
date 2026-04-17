@@ -360,6 +360,17 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
         applyColorButtonStyle(m_btnBroadcastTransparentBg, QColor(snapshot.broadcastTransparentBgColor));
     if (m_btnBroadcastOpaqueBg)
         applyColorButtonStyle(m_btnBroadcastOpaqueBg, QColor(snapshot.broadcastOpaqueBgColor));
+
+    // 방송창 전용 chat body / outline: 빈 문자열 = unset
+    auto applyColorOrUnset = [](QPushButton* btn, const QString& s) {
+        if (!btn) return;
+        if (s.trimmed().isEmpty()) { applyUnsetColorButtonStyle(btn); return; }
+        const QColor c(s);
+        if (c.isValid()) applyColorButtonStyle(btn, c);
+        else applyUnsetColorButtonStyle(btn);
+    };
+    applyColorOrUnset(m_btnBroadcastChatBodyColor, snapshot.broadcastChatBodyFontColor);
+    applyColorOrUnset(m_btnBroadcastChatOutlineColor, snapshot.broadcastChatOutlineColor);
 }
 
 void ConfigurationDialog::onTokenOperationStarted(PlatformId platform, const QString& operation)
@@ -1108,6 +1119,10 @@ AppSettingsSnapshot ConfigurationDialog::collectSnapshot() const
         snapshot.broadcastTransparentBgColor = m_btnBroadcastTransparentBg->property("colorValue").toString();
     if (m_btnBroadcastOpaqueBg)
         snapshot.broadcastOpaqueBgColor = m_btnBroadcastOpaqueBg->property("colorValue").toString();
+    if (m_btnBroadcastChatBodyColor)
+        snapshot.broadcastChatBodyFontColor = m_btnBroadcastChatBodyColor->property("colorValue").toString();
+    if (m_btnBroadcastChatOutlineColor)
+        snapshot.broadcastChatOutlineColor = m_btnBroadcastChatOutlineColor->property("colorValue").toString();
 
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();
     return snapshot;
@@ -1203,6 +1218,22 @@ void ConfigurationDialog::pickBroadcastColor(QPushButton* button, const QString&
     }
 }
 
+void ConfigurationDialog::applyUnsetColorButtonStyle(QPushButton* button)
+{
+    // "미설정" 시각: 회색 체커보드 대신 단순 회색 텍스트 + 점선 테두리
+    button->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #f4f4f4; border: 1px dashed #888; "
+        "min-width: 80px; min-height: 20px; color: #666; }"));
+    button->setText(tr("Not set"));
+    button->setProperty("colorValue", QString());
+}
+
+void ConfigurationDialog::clearBroadcastColor(QPushButton* button)
+{
+    applyUnsetColorButtonStyle(button);
+    updateBroadcastPreview();
+}
+
 QWidget* ConfigurationDialog::createBroadcastTab()
 {
     auto* page = new QWidget;
@@ -1240,6 +1271,50 @@ QWidget* ConfigurationDialog::createBroadcastTab()
         pickBroadcastColor(m_btnBroadcastOpaqueBg, tr("Opaque Mode Background"));
     });
     formLayout->addRow(tr("Opaque Background"), m_btnBroadcastOpaqueBg);
+
+    // Chat body font color (방송창 전용) + Clear 버튼
+    {
+        m_btnBroadcastChatBodyColor = new QPushButton(page);
+        m_btnBroadcastChatBodyColorClear = new QPushButton(tr("Clear"), page);
+        connect(m_btnBroadcastChatBodyColor, &QPushButton::clicked, this, [this]() {
+            pickBroadcastColor(m_btnBroadcastChatBodyColor, tr("Chat Body Font Color"));
+        });
+        connect(m_btnBroadcastChatBodyColorClear, &QPushButton::clicked, this, [this]() {
+            clearBroadcastColor(m_btnBroadcastChatBodyColor);
+        });
+        m_btnBroadcastChatBodyColor->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_btnBroadcastChatBodyColor, &QPushButton::customContextMenuRequested, this, [this]() {
+            clearBroadcastColor(m_btnBroadcastChatBodyColor);
+        });
+        auto* hbox = new QHBoxLayout;
+        hbox->setContentsMargins(0, 0, 0, 0);
+        hbox->addWidget(m_btnBroadcastChatBodyColor);
+        hbox->addWidget(m_btnBroadcastChatBodyColorClear);
+        hbox->addStretch();
+        formLayout->addRow(tr("Chat Body Font Color"), hbox);
+    }
+
+    // Chat text outline color (방송창 전용) + Clear 버튼
+    {
+        m_btnBroadcastChatOutlineColor = new QPushButton(page);
+        m_btnBroadcastChatOutlineColorClear = new QPushButton(tr("Clear"), page);
+        connect(m_btnBroadcastChatOutlineColor, &QPushButton::clicked, this, [this]() {
+            pickBroadcastColor(m_btnBroadcastChatOutlineColor, tr("Chat Text Outline Color"));
+        });
+        connect(m_btnBroadcastChatOutlineColorClear, &QPushButton::clicked, this, [this]() {
+            clearBroadcastColor(m_btnBroadcastChatOutlineColor);
+        });
+        m_btnBroadcastChatOutlineColor->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_btnBroadcastChatOutlineColor, &QPushButton::customContextMenuRequested, this, [this]() {
+            clearBroadcastColor(m_btnBroadcastChatOutlineColor);
+        });
+        auto* hbox = new QHBoxLayout;
+        hbox->setContentsMargins(0, 0, 0, 0);
+        hbox->addWidget(m_btnBroadcastChatOutlineColor);
+        hbox->addWidget(m_btnBroadcastChatOutlineColorClear);
+        hbox->addStretch();
+        formLayout->addRow(tr("Chat Text Outline Color"), hbox);
+    }
 
     pageLayout->addLayout(formLayout, 0);  // stretch=0: 고정 높이
 
@@ -1339,6 +1414,16 @@ void ConfigurationDialog::updateBroadcastPreview()
     m_broadcastPreviewDelegate->setFontBold(m_chkChatFontBold->isChecked());
     m_broadcastPreviewDelegate->setFontItalic(m_chkChatFontItalic->isChecked());
     m_broadcastPreviewDelegate->setLineSpacing(m_spnChatLineSpacing->value());
+    // 방송창 전용: body override / outline
+    auto parseColor = [](QPushButton* btn) -> QColor {
+        if (!btn) return QColor();
+        const QString s = btn->property("colorValue").toString();
+        if (s.trimmed().isEmpty()) return QColor();
+        const QColor c(s);
+        return c.isValid() ? c : QColor();
+    };
+    m_broadcastPreviewDelegate->setBodyOverrideColor(parseColor(m_btnBroadcastChatBodyColor));
+    m_broadcastPreviewDelegate->setTextOutlineColor(parseColor(m_btnBroadcastChatOutlineColor));
 
     const int w = m_spnBroadcastWidth->value();
     const int h = m_spnBroadcastHeight->value();

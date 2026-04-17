@@ -57,6 +57,8 @@ private:
     QWidget* createBroadcastTab();
     void pickBroadcastColor(QPushButton* button, const QString& title);
     static void applyColorButtonStyle(QPushButton* button, const QColor& color);
+    static void applyUnsetColorButtonStyle(QPushButton* button);
+    void clearBroadcastColor(QPushButton* button);
     void updateBroadcastPreview();
 
     AppSettingsSnapshot collectSnapshot() const;
@@ -142,6 +144,10 @@ private:
     QSpinBox* m_spnBroadcastHeight = nullptr;
     QPushButton* m_btnBroadcastTransparentBg = nullptr;
     QPushButton* m_btnBroadcastOpaqueBg = nullptr;
+    QPushButton* m_btnBroadcastChatBodyColor = nullptr;
+    QPushButton* m_btnBroadcastChatBodyColorClear = nullptr;
+    QPushButton* m_btnBroadcastChatOutlineColor = nullptr;
+    QPushButton* m_btnBroadcastChatOutlineColorClear = nullptr;
     QWidget* m_broadcastPreviewRenderer = nullptr;
     QListView* m_broadcastPreviewList = nullptr;
     ChatBubbleDelegate* m_broadcastPreviewDelegate = nullptr;

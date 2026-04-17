@@ -257,6 +257,15 @@ void BroadcastChatWindow::updateViewerCount(int youtubeCount, int chzzkCount)
     repositionViewerCountOverlay();
 }
 
+namespace {
+QColor parseColorOrInvalid(const QString& s)
+{
+    if (s.trimmed().isEmpty()) return QColor();
+    const QColor c(s);
+    return c.isValid() ? c : QColor();
+}
+} // namespace
+
 void BroadcastChatWindow::applySettings(const AppSettingsSnapshot& snapshot)
 {
     m_delegate->setFontFamily(snapshot.chatFontFamily);
@@ -264,6 +273,9 @@ void BroadcastChatWindow::applySettings(const AppSettingsSnapshot& snapshot)
     m_delegate->setFontBold(snapshot.chatFontBold);
     m_delegate->setFontItalic(snapshot.chatFontItalic);
     m_delegate->setLineSpacing(snapshot.chatLineSpacing);
+    // 방송창 전용 스타일 (UPDATE_BROADCAHT_STYLE.md)
+    m_delegate->setBodyOverrideColor(parseColorOrInvalid(snapshot.broadcastChatBodyFontColor));
+    m_delegate->setTextOutlineColor(parseColorOrInvalid(snapshot.broadcastChatOutlineColor));
 
     m_viewerCountPosition = snapshot.broadcastViewerCountPosition;
 
