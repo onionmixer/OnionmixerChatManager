@@ -10,7 +10,6 @@
 #include "i18n/AppLanguage.h"
 #include "ui/BroadcastChatWindow.h"
 #include "ui/ChatBubbleDelegate.h"
-#include "ui/EmojiTextDocument.h"
 #include "ui/ChatDisplayController.h"
 #include "ui/ChatBubbleWidget.h"
 #include "ui/ChatMessageModel.h"
@@ -161,8 +160,6 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     m_chatterStatsManager = new ChatterStatsManager(this);
     m_chatDelegate = new ChatBubbleDelegate(this);
     m_chatDelegate->setEmojiCache(m_emojiCache);
-    // UAT: C+ 진단 로그 활성화 (FIX_CHAT_EMOTICON.md §5.2). UAT 통과 후 제거 예정.
-    EmojiTextDocument::setTraceEnabled(true);
     setupUi();
     // 비동기 이모지 로드 완료 시 messenger 뷰·방송창·Config preview 재페인트로
     // broken-image → 실제 이미지 전환 (C+ 강화: preview 2개도 update 대상에 포함)
