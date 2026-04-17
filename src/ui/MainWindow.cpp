@@ -2474,8 +2474,7 @@ QMap<PlatformId, bool> MainWindow::currentConnections() const
 
 void MainWindow::requestYouTubeViewerCount()
 {
-    auto logLine = [this](const QString& line) {
-        if (m_txtEventLog) m_txtEventLog->append(line);
+    auto logLine = [](const QString& line) {
         qInfo().noquote() << line;
     };
 
