@@ -29,6 +29,7 @@
 #include <QDialogButtonBox>
 #include <QGuiApplication>
 #include <QPainter>
+#include <QTextDocument>
 #include <QResizeEvent>
 #include <QStatusBar>
 #include <QTableWidget>
@@ -1430,22 +1431,31 @@ void ConfigurationDialog::updateBroadcastPreview()
     m_broadcastPreviewRenderer->resize(w, h);
     emit m_broadcastPreviewList->model()->layoutChanged();
 
-    // viewer count 오버레이 렌더링 헬퍼
-    const QString viewerText = QStringLiteral("%1 \u2014  %2 \u2014  \u03A3 \u2014")
-        .arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), PlatformTraits::badgeSymbol(PlatformId::Chzzk));
+    // viewer count 오버레이 렌더링 헬퍼 (BroadcastChatWindow와 동일 HTML 경로로
+    // rich-text 색상 반영 — 플랫폼 확장 시 ViewerCountStyle::buildViewerHtml의
+    // 엔트리 벡터에만 추가하면 자동 반영)
+    const QVector<QPair<PlatformId, int>> previewEntries = {
+        { PlatformId::YouTube, -1 },
+        { PlatformId::Chzzk, -1 },
+    };
+    const QString viewerHtml = ViewerCountStyle::buildViewerHtml(previewEntries);
     const QString position = m_cmbBroadcastViewerPosition->currentText();
 
     auto drawViewerOverlay = [&](QPainter& painter, int pw, int ph) {
-        // Phase 1 Gap 20: QApplication::font() + Bold로 통일 (실제 방송창 QLabel 상속 폰트와 일치)
         QFont overlayFont = QGuiApplication::font();
         overlayFont.setBold(true);
-        painter.setFont(overlayFont);
-        const QFontMetrics fm(overlayFont);
-        const int textW = fm.horizontalAdvance(viewerText) + ViewerCountStyle::kPaddingX * 2;
-        const int textH = fm.height() + ViewerCountStyle::kPaddingY * 2;
+
+        QTextDocument doc;
+        doc.setDefaultFont(overlayFont);
+        doc.setDefaultStyleSheet(
+            QStringLiteral("body { color: %1; }").arg(QColor::fromRgb(ViewerCountStyle::kFg).name()));
+        doc.setHtml(viewerHtml);
+        doc.setTextWidth(-1);
+        const QSizeF docSize = doc.size();
+        const int textW = static_cast<int>(docSize.width()) + ViewerCountStyle::kPaddingX * 2;
+        const int textH = static_cast<int>(docSize.height()) + ViewerCountStyle::kPaddingY * 2;
         const int margin = 8;
 
-        // Phase 2: CenterLeft/CenterRight는 90° CW 회전
         const bool rotate = (position == QStringLiteral("CenterLeft")
                              || position == QStringLiteral("CenterRight"));
         const int bbW = rotate ? textH : textW;
@@ -1461,6 +1471,7 @@ void ConfigurationDialog::updateBroadcastPreview()
 
         painter.save();
         painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setRenderHint(QPainter::TextAntialiasing, true);
         if (rotate) {
             painter.translate(ox + bbW / 2.0, oy + bbH / 2.0);
             painter.rotate(90);
@@ -1468,14 +1479,18 @@ void ConfigurationDialog::updateBroadcastPreview()
             painter.setBrush(QColor::fromRgba(ViewerCountStyle::kBg));
             painter.setPen(Qt::NoPen);
             painter.drawRoundedRect(0, 0, textW, textH, ViewerCountStyle::kRadius, ViewerCountStyle::kRadius);
-            painter.setPen(QColor::fromRgb(ViewerCountStyle::kFg));
-            painter.drawText(QRect(0, 0, textW, textH), Qt::AlignCenter, viewerText);
+            painter.save();
+            painter.translate(ViewerCountStyle::kPaddingX, ViewerCountStyle::kPaddingY);
+            doc.drawContents(&painter);
+            painter.restore();
         } else {
             painter.setBrush(QColor::fromRgba(ViewerCountStyle::kBg));
             painter.setPen(Qt::NoPen);
             painter.drawRoundedRect(ox, oy, textW, textH, ViewerCountStyle::kRadius, ViewerCountStyle::kRadius);
-            painter.setPen(QColor::fromRgb(ViewerCountStyle::kFg));
-            painter.drawText(QRect(ox, oy, textW, textH), Qt::AlignCenter, viewerText);
+            painter.save();
+            painter.translate(ox + ViewerCountStyle::kPaddingX, oy + ViewerCountStyle::kPaddingY);
+            doc.drawContents(&painter);
+            painter.restore();
         }
         painter.restore();
     };

@@ -17,6 +17,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QStringList>
+#include <QTextDocument>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -171,21 +172,13 @@ void BroadcastChatWindow::repositionViewerCountOverlay()
 
 QString BroadcastChatWindow::buildViewerCountText() const
 {
-    auto formatCount = [](int count) -> QString {
-        return count >= 0 ? QLocale().toString(count) : QStringLiteral("\u2014");
+    // 플랫폼 색상이 적용된 rich-text HTML. 플랫폼 확장 시 아래 엔트리 벡터에만
+    // 추가하면 자동으로 반영됨 (ViewerCountStyle::buildViewerHtml 참조).
+    const QVector<QPair<PlatformId, int>> entries = {
+        { PlatformId::YouTube, m_youtubeViewerCount },
+        { PlatformId::Chzzk, m_chzzkViewerCount },
     };
-
-    QStringList parts;
-    parts << QStringLiteral("%1 %2").arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), formatCount(m_youtubeViewerCount));
-    parts << QStringLiteral("%1 %2").arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk), formatCount(m_chzzkViewerCount));
-
-    int total = 0;
-    bool hasAny = false;
-    if (m_youtubeViewerCount >= 0) { total += m_youtubeViewerCount; hasAny = true; }
-    if (m_chzzkViewerCount >= 0) { total += m_chzzkViewerCount; hasAny = true; }
-    parts << QStringLiteral("\u03A3 %1").arg(hasAny ? QLocale().toString(total) : QStringLiteral("\u2014"));
-
-    return parts.join(QStringLiteral("  "));
+    return ViewerCountStyle::buildViewerHtml(entries);
 }
 
 bool BroadcastChatWindow::isRotatedViewerPosition() const
@@ -196,11 +189,20 @@ bool BroadcastChatWindow::isRotatedViewerPosition() const
 
 QPixmap BroadcastChatWindow::renderViewerCountPixmap(const QString& text, bool rotated) const
 {
+    // text 인자는 buildViewerCountText()가 반환한 rich-text HTML.
     QFont font = QGuiApplication::font();
     font.setBold(true);
-    const QFontMetrics fm(font);
-    const int textW = fm.horizontalAdvance(text) + ViewerCountStyle::kPaddingX * 2;
-    const int textH = fm.height() + ViewerCountStyle::kPaddingY * 2;
+
+    // HTML을 QTextDocument로 측정·렌더해 아이콘별 색상 반영.
+    QTextDocument doc;
+    doc.setDefaultFont(font);
+    doc.setDefaultStyleSheet(
+        QStringLiteral("body { color: %1; }").arg(QColor::fromRgb(ViewerCountStyle::kFg).name()));
+    doc.setHtml(text);
+    doc.setTextWidth(-1);
+    const QSizeF docSize = doc.size();
+    const int textW = static_cast<int>(docSize.width()) + ViewerCountStyle::kPaddingX * 2;
+    const int textH = static_cast<int>(docSize.height()) + ViewerCountStyle::kPaddingY * 2;
 
     const int pmW = rotated ? textH : textW;
     const int pmH = rotated ? textW : textH;
@@ -213,6 +215,7 @@ QPixmap BroadcastChatWindow::renderViewerCountPixmap(const QString& text, bool r
 
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::TextAntialiasing);
     if (rotated) {
         // 90° CW rotation centered on pixmap
         p.translate(pmW / 2.0, pmH / 2.0);
@@ -222,9 +225,12 @@ QPixmap BroadcastChatWindow::renderViewerCountPixmap(const QString& text, bool r
     p.setBrush(QColor::fromRgba(ViewerCountStyle::kBg));
     p.setPen(Qt::NoPen);
     p.drawRoundedRect(0, 0, textW, textH, ViewerCountStyle::kRadius, ViewerCountStyle::kRadius);
-    p.setPen(QColor::fromRgb(ViewerCountStyle::kFg));
-    p.setFont(font);
-    p.drawText(QRect(0, 0, textW, textH), Qt::AlignCenter, text);
+
+    // 본문 영역(padding 내부)에 document 렌더
+    p.save();
+    p.translate(ViewerCountStyle::kPaddingX, ViewerCountStyle::kPaddingY);
+    doc.drawContents(&p);
+    p.restore();
     p.end();
     return pm;
 }
@@ -232,18 +238,19 @@ QPixmap BroadcastChatWindow::renderViewerCountPixmap(const QString& text, bool r
 void BroadcastChatWindow::renderViewerCountLabel()
 {
     if (!m_viewerCountLabel) return;
-    const QString text = buildViewerCountText();
+    const QString html = buildViewerCountText();  // rich-text HTML
     if (isRotatedViewerPosition()) {
         // 회전: pixmap 기반 (CSS clear, text clear, pixmap 설정)
         m_viewerCountLabel->setStyleSheet(QString());
         m_viewerCountLabel->setText(QString());
-        m_viewerCountLabel->setPixmap(renderViewerCountPixmap(text, true));
+        m_viewerCountLabel->setPixmap(renderViewerCountPixmap(html, true));
     } else {
-        // 비회전: 기존 CSS + text
+        // 비회전: QLabel이 RichText 모드에서 span style="color"를 respect
         m_viewerCountLabel->setStyleSheet(QStringLiteral(
             "background: rgba(0,0,0,160); color: #ffffff; padding: 4px 8px; border-radius: 4px; font-weight: bold;"));
         m_viewerCountLabel->setPixmap(QPixmap());  // pixmap 해제
-        m_viewerCountLabel->setText(text);
+        m_viewerCountLabel->setTextFormat(Qt::RichText);
+        m_viewerCountLabel->setText(html);
     }
     m_viewerCountLabel->adjustSize();
 }
