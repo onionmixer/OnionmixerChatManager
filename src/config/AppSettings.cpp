@@ -60,8 +60,8 @@ PlatformSettings defaultChzzk()
     PlatformSettings s;
     s.enabled = false;
     s.redirectUri = QStringLiteral("http://127.0.0.1:18081/chzzk/callback");
-    s.authEndpoint = QStringLiteral("https://chzzk.example.com/oauth/authorize");
-    s.tokenEndpoint = QStringLiteral("https://chzzk.example.com/oauth/token");
+    s.authEndpoint = QStringLiteral("https://chzzk.naver.com/account-interlock");
+    s.tokenEndpoint = QStringLiteral("https://openapi.chzzk.naver.com/auth/v1/token");
     s.scope = QStringLiteral("유저 정보 조회 채팅 메시지 조회 채팅 메시지 전송");
     return s;
 }
