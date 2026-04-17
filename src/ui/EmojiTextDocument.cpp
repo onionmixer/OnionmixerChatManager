@@ -1,7 +1,13 @@
 #include "ui/EmojiTextDocument.h"
 #include "core/EmojiImageCache.h"
 
-#include <QDebug>
+// [EMOJI-RESOLVE] 진단 로그는 기본 비활성화 상태이며 아래에 주석으로
+// 보관되어 있음. 재발 시 활성화 절차:
+//   1) 아래 <QDebug> include 주석 해제
+//   2) loadResource 내부의 qInfo().noquote() 라인 4개 주석 해제
+//   3) MainWindow 생성자에서 EmojiTextDocument::setTraceEnabled(true) 호출 추가
+// 출력은 stderr로 나가며, 구조는 FIX_CHAT_EMOTICON.md §11.3 참조.
+// #include <QDebug>
 #include <QPixmap>
 #include <QUrl>
 
@@ -59,7 +65,8 @@ QVariant EmojiTextDocument::loadResource(int type, const QUrl& name)
     // EmojiImageCache와 m_idToUrl은 원본 case를 유지하므로 비교는 case-insensitive.
     const QString lookupId = extractEmojiId(name);
     if (lookupId.isEmpty()) {
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] empty-id url=" << name.toString();
+        // if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] empty-id url=" << name.toString();
+        (void)g_traceEnabled;  // 재활성화 시 상단 안내 참조
         return QVariant();
     }
 
@@ -75,19 +82,19 @@ QVariant EmojiTextDocument::loadResource(int type, const QUrl& name)
     }
 
     if (originalId.isEmpty()) {
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss-no-url id=" << lookupId;
+        // if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss-no-url id=" << lookupId;
         return QVariant();
     }
 
     // 캐시 히트 (원본 case로 조회)
     if (m_cache && m_cache->contains(originalId)) {
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] hit id=" << originalId;
+        // if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] hit id=" << originalId;
         return QVariant(m_cache->get(originalId));
     }
 
     // 캐시 미스 — 원본 case로 ensureLoaded 자동 트리거
     if (m_cache) {
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss+load id=" << originalId << "url=" << url;
+        // if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss+load id=" << originalId << "url=" << url;
         m_cache->ensureLoaded(originalId, url);
     }
     // 로드 완료 후 imageReady → viewport 재페인트 시 이 함수 재호출 → 히트 처리.
