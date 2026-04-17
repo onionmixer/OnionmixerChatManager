@@ -179,6 +179,23 @@ account_label=
 - `client_secret`
 - API key
 
+#### Client ID 발급 절차 (Google Cloud Console)
+
+1. https://console.cloud.google.com/ 접속 후 로그인
+2. 상단 프로젝트 선택기에서 프로젝트를 새로 만들거나 기존 프로젝트 선택
+3. `APIs & Services` → `Library`에서 **YouTube Data API v3** 검색 후 `Enable`
+4. `APIs & Services` → `OAuth consent screen`
+   - User Type: `External` (개인 사용 시)
+   - 앱 이름 / 지원 이메일 등 필수 항목 입력
+   - `Scopes`에 아래 두 개 추가:
+     - `https://www.googleapis.com/auth/youtube.readonly`
+     - `https://www.googleapis.com/auth/youtube.force-ssl`
+   - 앱을 테스트 모드로 두는 경우 본인 계정을 `Test users`에 추가
+5. `APIs & Services` → `Credentials` → `Create Credentials` → `OAuth client ID`
+   - Application type: **Web application**
+   - Authorized redirect URIs에 `http://127.0.0.1:18080/youtube/callback` 정확히 일치하게 등록
+6. 발급된 **Client ID**와 **Client secret**을 `config.ini`의 `[youtube]` 섹션에 붙여넣기
+
 채팅 수신 우선순위:
 1. InnerTube WebChat
 2. `liveChatMessages.streamList`
@@ -202,6 +219,16 @@ account_label=
 
 채팅 수신 흐름:
 - session auth -> socket connect -> subscribe -> chat receive
+
+#### Client ID 발급 절차 (CHZZK 개발자 센터)
+
+1. https://developers.chzzk.naver.com/ 접속 후 네이버 계정으로 로그인
+2. `애플리케이션` 메뉴에서 새 애플리케이션 등록
+   - 애플리케이션 이름 / 설명 입력
+   - **Redirect URI**에 `http://127.0.0.1:18081/chzzk/callback` 등록 (config의 값과 정확히 일치해야 함)
+   - 필요한 권한(scope) 선택 — 채팅 수신에 필요한 `chat:read` 등 해당 항목
+3. 등록 완료 후 발급된 **Client ID**와 **Client Secret**을 `config.ini`의 `[chzzk]` 섹션에 붙여넣기
+4. 필요 시 치지직 개발자 센터의 최신 가이드에서 endpoint / scope 변경 여부 확인
 
 ## 7. UI 개요
 
