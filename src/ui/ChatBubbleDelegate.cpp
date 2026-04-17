@@ -3,19 +3,18 @@
 #include "core/PlatformTraits.h"
 #include "ui/ChatMessageModel.h"
 
+#include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QBuffer>
 #include <QPainter>
 #include <QPainterPath>
-#include <QTextBlock>
 #include <QTextDocument>
-#include <QTextFragment>
-#include <QTextLayout>
 
 namespace {
 constexpr qreal kOutlineWidthPx = 1.5;
 
 // 텍스트 한 문자열에 대해 stroke outline을 그린다 (drawText 이전에 호출)
+// nick·timestamp 전용 — 명시적 baseline 기반, layout 의존 없음.
 void strokeTextAt(QPainter* p, const QColor& color, const QString& text,
                   const QFont& font, const QPointF& baseline)
 {
@@ -25,36 +24,6 @@ void strokeTextAt(QPainter* p, const QColor& color, const QString& text,
     const QPen pen(color, kOutlineWidthPx, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     p->setBrush(Qt::NoBrush);
     p->strokePath(path, pen);
-}
-
-// QTextDocument 본문 중 텍스트 fragment만 찾아 각 line별로 outline을 그린다.
-// QTextLayout::glyphRuns 기반으로 이모지 이미지는 skip.
-void strokeBodyTextFragments(QTextDocument* doc, QPainter* p, const QColor& outlineColor)
-{
-    if (!doc || !outlineColor.isValid()) return;
-    const QPen pen(outlineColor, kOutlineWidthPx, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-    p->setBrush(Qt::NoBrush);
-
-    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-        QTextLayout* layout = block.layout();
-        if (!layout) continue;
-        for (int i = 0, n = layout->lineCount(); i < n; ++i) {
-            const QTextLine line = layout->lineAt(i);
-            const QList<QGlyphRun> runs = line.glyphRuns();
-            for (const QGlyphRun& run : runs) {
-                QPainterPath path;
-                const QRawFont& rawFont = run.rawFont();
-                const QVector<quint32> indexes = run.glyphIndexes();
-                const QVector<QPointF> positions = run.positions();
-                const QPointF runPos = layout->position();
-                for (int g = 0; g < indexes.size() && g < positions.size(); ++g) {
-                    const QPainterPath glyphPath = rawFont.pathForGlyph(indexes[g]);
-                    path.addPath(glyphPath.translated(runPos + positions[g]));
-                }
-                p->strokePath(path, pen);
-            }
-        }
-    }
 }
 } // namespace
 
@@ -194,17 +163,39 @@ void ChatBubbleDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
     doc.setHtml(html);
 
     painter->translate(bodyLeft, bodyTop);
-    // 본문 outline (stroke first, fill after — §2)
-    if (m_textOutlineColor.isValid()) {
-        painter->setRenderHint(QPainter::Antialiasing, true);
-        strokeBodyTextFragments(&doc, painter, m_textOutlineColor);
+
+    // §25.3 fallback: documentLayout()->draw + PaintContext.palette 경로
+    // - drawContents가 <p> 자동 스타일에 밀려 painter pen을 무시하는 문제 회피
+    // - body outline은 8방향 1px offset 반복 렌더 (stroke-first-fill-after, §2)
+    // - nick·timestamp는 여전히 QPainterPath strokeTextAt 사용 (layout 문제 없음)
+    auto* layout = doc.documentLayout();
+    if (layout) {
+        // Outline: fill 이전에 8방향 offset 반복 렌더
+        if (m_textOutlineColor.isValid()) {
+            painter->setRenderHint(QPainter::Antialiasing, true);
+            QAbstractTextDocumentLayout::PaintContext strokeCtx;
+            strokeCtx.palette = option.palette;
+            strokeCtx.palette.setColor(QPalette::Text, m_textOutlineColor);
+            static const QPoint kOffsets[] = {
+                {-1,-1}, { 0,-1}, { 1,-1},
+                {-1, 0},          { 1, 0},
+                {-1, 1}, { 0, 1}, { 1, 1}
+            };
+            for (const QPoint& off : kOffsets) {
+                painter->translate(off);
+                layout->draw(painter, strokeCtx);
+                painter->translate(-off);
+            }
+        }
+        // Fill: PaintContext.palette로 기본 텍스트 색 확정
+        QAbstractTextDocumentLayout::PaintContext fillCtx;
+        fillCtx.palette = option.palette;
+        const QColor bodyColor = m_bodyOverrideColor.isValid()
+                               ? m_bodyOverrideColor
+                               : QColor(QStringLiteral("#111111"));
+        fillCtx.palette.setColor(QPalette::Text, bodyColor);
+        layout->draw(painter, fillCtx);
     }
-    // 본문 색: override 우선, 없으면 기본 #111111
-    const QColor bodyColor = m_bodyOverrideColor.isValid()
-                           ? m_bodyOverrideColor
-                           : QColor(QStringLiteral("#111111"));
-    painter->setPen(bodyColor);
-    doc.drawContents(painter);
     painter->translate(-bodyLeft, -bodyTop);
 
     painter->restore();
