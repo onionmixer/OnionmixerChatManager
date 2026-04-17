@@ -192,9 +192,15 @@ account_label=
      - `https://www.googleapis.com/auth/youtube.force-ssl`
    - 앱을 테스트 모드로 두는 경우 본인 계정을 `Test users`에 추가
 5. `APIs & Services` → `Credentials` → `Create Credentials` → `OAuth client ID`
-   - Application type: **Web application**
+   - Application type: **Desktop app** 또는 **Web application** 모두 동작 (Desktop app 권장)
    - Authorized redirect URIs에 `http://127.0.0.1:18080/youtube/callback` 정확히 일치하게 등록
 6. 발급된 **Client ID**와 **Client secret**을 `config.ini`의 `[youtube]` 섹션에 붙여넣기
+
+> ⚠️ **`client_secret`은 Desktop app 타입에서도 반드시 필요합니다.**
+> 구글은 "Desktop app의 secret은 기밀이 아니다"라고 명시하지만, 토큰 교환(`/token`) 요청에는 `client_secret` 파라미터가 필수입니다. 누락되면 브라우저 인증(`OAuth 완료`)까지는 통과하지만 앱에서 `Interactive re-auth failed`로 실패합니다.
+>
+> `client_secret` 확인:
+> `APIs & Services` → `Credentials` → 해당 OAuth 클라이언트 이름 클릭 → 상세 페이지 우측의 `Client secret` (`GOCSPX-...` 로 시작) 또는 상단 `DOWNLOAD JSON` 버튼으로 받은 파일의 `client_secret` 필드.
 
 채팅 수신 우선순위:
 1. InnerTube WebChat
@@ -206,8 +212,14 @@ account_label=
 
 인증 오류 확인 항목:
 - `client_id`가 실제 OAuth Client ID인지
+- `client_secret`이 `GOCSPX-...` 형태로 채워져 있는지 (Desktop app 타입도 필수)
 - `redirect_uri`가 등록된 값과 정확히 일치하는지
 - Google Console에 동일 redirect URI가 등록되어 있는지
+- OAuth consent screen이 `Testing` 상태면 본인 계정이 `Test users`에 있는지 (테스트 모드의 refresh token은 7일 후 만료)
+
+증상별 원인:
+- 브라우저는 `OAuth 완료`로 끝나는데 앱에서 `Interactive re-auth failed` → 대부분 `client_secret` 누락 (`invalid_client`)
+- 토큰 갱신만 실패 → refresh token 만료/철회, 또는 consent screen Testing 상태에서 7일 경과
 
 ### 6.2 CHZZK
 
