@@ -54,25 +54,41 @@ QVariant EmojiTextDocument::loadResource(int type, const QUrl& name)
         return QTextDocument::loadResource(type, name);
     }
 
-    const QString id = extractEmojiId(name);
-    if (id.isEmpty()) {
+    // Qt의 QUrl은 host 부분을 DNS 규칙에 따라 **자동 소문자화**함.
+    // 예: emoji://UCkszU2WH9gy1mb0dV-11UJg/xxx → host "uckszu2wh9gy1mb0dv-11ujg"
+    // EmojiImageCache와 m_idToUrl은 원본 case를 유지하므로 비교는 case-insensitive.
+    const QString lookupId = extractEmojiId(name);
+    if (lookupId.isEmpty()) {
         if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] empty-id url=" << name.toString();
         return QVariant();
     }
 
-    // 캐시 히트
-    if (m_cache && m_cache->contains(id)) {
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] hit id=" << id;
-        return QVariant(m_cache->get(id));
+    // m_idToUrl에서 case-insensitive 검색 → 원본 case id 획득
+    QString originalId;
+    QString url;
+    for (auto it = m_idToUrl.constBegin(); it != m_idToUrl.constEnd(); ++it) {
+        if (it.key().compare(lookupId, Qt::CaseInsensitive) == 0) {
+            originalId = it.key();
+            url = it.value();
+            break;
+        }
     }
 
-    // 캐시 미스 — id→url 맵에서 조회해 자동 ensureLoaded 트리거
-    if (m_cache && m_idToUrl.contains(id)) {
-        const QString url = m_idToUrl.value(id);
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss+load id=" << id << "url=" << url;
-        m_cache->ensureLoaded(id, url);
-    } else {
-        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss-no-url id=" << id;
+    if (originalId.isEmpty()) {
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss-no-url id=" << lookupId;
+        return QVariant();
+    }
+
+    // 캐시 히트 (원본 case로 조회)
+    if (m_cache && m_cache->contains(originalId)) {
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] hit id=" << originalId;
+        return QVariant(m_cache->get(originalId));
+    }
+
+    // 캐시 미스 — 원본 case로 ensureLoaded 자동 트리거
+    if (m_cache) {
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss+load id=" << originalId << "url=" << url;
+        m_cache->ensureLoaded(originalId, url);
     }
     // 로드 완료 후 imageReady → viewport 재페인트 시 이 함수 재호출 → 히트 처리.
     return QVariant();
