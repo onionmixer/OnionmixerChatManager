@@ -3,7 +3,6 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QStringList>
 
@@ -340,7 +339,6 @@ UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const
             richText += t.toHtmlEscaped();
         } else if (run.contains(QStringLiteral("emoji"))) {
             const QJsonObject emoji = run.value(QStringLiteral("emoji")).toObject();
-            qDebug() << "[EMOJI-TRACE]" << QJsonDocument(emoji).toJson(QJsonDocument::Compact).left(500);
             const bool isCustom = emoji.value(QStringLiteral("isCustomEmoji")).toBool(false);
             const QString emojiId = emoji.value(QStringLiteral("emojiId")).toString();
             if (!isCustom && !emojiId.isEmpty() && !emojiId.contains(QLatin1Char('/'))) {
