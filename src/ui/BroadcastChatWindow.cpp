@@ -39,7 +39,9 @@ BroadcastChatWindow::BroadcastChatWindow(ChatMessageModel* model, EmojiImageCach
     m_listView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_listView->setUniformItemSizes(false);
     m_listView->setFrameShape(QFrame::NoFrame);
+    // 방송창에서는 스크롤바를 항상 숨긴다 (마우스 휠 스크롤은 policy와 무관하게 유지됨)
     m_listView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_listView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_listView->setStyleSheet(QStringLiteral("background: transparent;"));
     m_listView->viewport()->setAutoFillBackground(false);
     m_listView->viewport()->installEventFilter(this);
@@ -122,11 +124,10 @@ void BroadcastChatWindow::setTransparentMode(bool transparent)
 
     if (transparent) {
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
-        m_listView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     } else {
         setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
-        m_listView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     }
+    // 방송창은 투명/불투명 모드 모두 스크롤바 비표시 유지 (휠 스크롤은 정상 동작)
     // Use setGeometry (not move) in both modes: Qt5/X11 retains stale frame margin
     // cache across setWindowFlags, which makes move() place the native window offset
     // by the old title-bar height. setGeometry sets crect directly, bypassing it.
