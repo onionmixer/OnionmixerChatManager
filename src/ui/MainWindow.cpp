@@ -24,6 +24,7 @@
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QEvent>
 #include <QFrame>
@@ -2473,17 +2474,22 @@ QMap<PlatformId, bool> MainWindow::currentConnections() const
 
 void MainWindow::requestYouTubeViewerCount()
 {
+    auto logLine = [this](const QString& line) {
+        if (m_txtEventLog) m_txtEventLog->append(line);
+        qInfo().noquote() << line;
+    };
+
     if (m_awaitingYouTubeViewerCount) return;
 
     const QString videoId = m_youtubeAdapter.currentVideoId().trimmed();
     if (videoId.isEmpty()) {
-        if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] skip: videoId empty"));
+        logLine(QStringLiteral("[VIEWERS-YT] skip: videoId empty"));
         updateViewerCount(PlatformId::YouTube, -1);
         return;
     }
     TokenRecord record;
     if (!m_tokenManager.readToken(PlatformId::YouTube, &record) || record.accessToken.trimmed().isEmpty()) {
-        if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] skip: access token missing"));
+        logLine(QStringLiteral("[VIEWERS-YT] skip: access token missing"));
         return;
     }
 
@@ -2498,12 +2504,12 @@ void MainWindow::requestYouTubeViewerCount()
 
     QNetworkReply* reply = m_networkAccessManager.get(req);
     if (!reply) {
-        if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] skip: failed to create reply"));
+        logLine(QStringLiteral("[VIEWERS-YT] skip: failed to create reply"));
         return;
     }
     m_awaitingYouTubeViewerCount = true;
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, videoId]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, videoId, logLine]() {
         m_awaitingYouTubeViewerCount = false;
 
         if (!m_youtubeViewerCountTimer || !m_youtubeViewerCountTimer->isActive()) {
@@ -2521,11 +2527,9 @@ void MainWindow::requestYouTubeViewerCount()
         if (netErr != QNetworkReply::NoError || httpStatus < 200 || httpStatus >= 300) {
             const QString apiMsg = obj.value(QStringLiteral("error")).toObject()
                 .value(QStringLiteral("message")).toString();
-            if (m_txtEventLog) {
-                m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] http=%1 err=%2 msg=%3")
-                    .arg(httpStatus).arg(netErr)
-                    .arg(apiMsg.isEmpty() ? reply->errorString() : apiMsg));
-            }
+            logLine(QStringLiteral("[VIEWERS-YT] http=%1 err=%2 msg=%3")
+                .arg(httpStatus).arg(netErr)
+                .arg(apiMsg.isEmpty() ? reply->errorString() : apiMsg));
             updateViewerCount(PlatformId::YouTube, -1);
             reply->deleteLater();
             return;
@@ -2534,23 +2538,23 @@ void MainWindow::requestYouTubeViewerCount()
         int viewers = -1;
         const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
         if (items.isEmpty()) {
-            if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] empty items for videoId=%1").arg(videoId));
+            logLine(QStringLiteral("[VIEWERS-YT] empty items for videoId=%1").arg(videoId));
         } else {
             const QJsonObject details = items.first().toObject()
                 .value(QStringLiteral("liveStreamingDetails")).toObject();
             if (details.isEmpty()) {
-                if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] liveStreamingDetails missing for videoId=%1").arg(videoId));
+                logLine(QStringLiteral("[VIEWERS-YT] liveStreamingDetails missing for videoId=%1").arg(videoId));
             } else if (!details.contains(QStringLiteral("concurrentViewers"))) {
-                if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] concurrentViewers field absent (hidden or not live) videoId=%1").arg(videoId));
+                logLine(QStringLiteral("[VIEWERS-YT] concurrentViewers field absent (hidden or not live) videoId=%1").arg(videoId));
             } else {
                 const QString cv = details.value(QStringLiteral("concurrentViewers")).toString();
                 bool ok = false;
                 const int parsed = cv.toInt(&ok);
                 if (ok) {
                     viewers = parsed;
-                    if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] count=%1").arg(viewers));
+                    logLine(QStringLiteral("[VIEWERS-YT] count=%1").arg(viewers));
                 } else {
-                    if (m_txtEventLog) m_txtEventLog->append(QStringLiteral("[VIEWERS-YT] failed to parse concurrentViewers=%1").arg(cv));
+                    logLine(QStringLiteral("[VIEWERS-YT] failed to parse concurrentViewers=%1").arg(cv));
                 }
             }
         }
