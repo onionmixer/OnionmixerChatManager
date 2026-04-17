@@ -157,9 +157,11 @@ void ChatBubbleDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
     const QString html = richText.isEmpty() ? messageText.toHtmlEscaped() : richText;
 
     // EmojiTextDocument: <img src='emoji://{id}'> placeholder를 EmojiImageCache
-    // 기반으로 해석. 캐시 미스면 비어 있고, 이후 imageReady 시 viewport update
-    // 로 재페인트되어 자연 복구.
+    // 기반으로 해석. C+ 강화: setEmojiList로 id→url 맵 주입 → 캐시 미스 시
+    // 자동 ensureLoaded 트리거. 이후 imageReady → viewport update로 재페인트.
     EmojiTextDocument doc(m_emojiCache);
+    doc.setEmojiList(index.data(ChatMessageModel::EmojisRole)
+                         .value<QVector<ChatEmojiInfo>>());
     doc.setDefaultFont(mf);
     doc.setTextWidth(bodyWidth);
     doc.setHtml(html);
@@ -220,6 +222,8 @@ QSize ChatBubbleDelegate::sizeHint(const QStyleOptionViewItem& option,
     const QString html = richText.isEmpty() ? messageText.toHtmlEscaped() : richText;
 
     EmojiTextDocument doc(m_emojiCache);
+    doc.setEmojiList(index.data(ChatMessageModel::EmojisRole)
+                         .value<QVector<ChatEmojiInfo>>());
     doc.setDefaultFont(messageFont());
     doc.setTextWidth(qMax(bodyWidth, 100));
     doc.setHtml(html);

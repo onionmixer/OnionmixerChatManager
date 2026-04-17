@@ -1,8 +1,34 @@
 #include "ui/EmojiTextDocument.h"
 #include "core/EmojiImageCache.h"
 
+#include <QDebug>
 #include <QPixmap>
 #include <QUrl>
+
+namespace {
+bool g_traceEnabled = false;
+
+// emoji://{id} URL → 원본 id 복원. QUrl의 host/path 분할을 거치지 않고
+// 문자열 접두사를 직접 제거해 슬래시·특수문자 포함 id도 안전하게 추출.
+QString extractEmojiId(const QUrl& url)
+{
+    const QString raw = url.toString(QUrl::None);
+    static const QString kPrefix = QStringLiteral("emoji://");
+    if (raw.startsWith(kPrefix)) {
+        return raw.mid(kPrefix.length());
+    }
+    // 폴백: QUrl host+path 결합
+    const QString host = url.host();
+    const QString path = url.path();
+    if (!host.isEmpty()) return path.isEmpty() ? host : host + path;
+    return path.startsWith('/') ? path.mid(1) : path;
+}
+} // namespace
+
+void EmojiTextDocument::setTraceEnabled(bool enabled)
+{
+    g_traceEnabled = enabled;
+}
 
 EmojiTextDocument::EmojiTextDocument(EmojiImageCache* cache, QObject* parent)
     : QTextDocument(parent)
@@ -10,28 +36,44 @@ EmojiTextDocument::EmojiTextDocument(EmojiImageCache* cache, QObject* parent)
 {
 }
 
+void EmojiTextDocument::setEmojiList(const QVector<ChatEmojiInfo>& list)
+{
+    m_idToUrl.clear();
+    m_idToUrl.reserve(list.size());
+    for (const ChatEmojiInfo& e : list) {
+        if (!e.emojiId.isEmpty() && !e.imageUrl.isEmpty()) {
+            m_idToUrl.insert(e.emojiId, e.imageUrl);
+        }
+    }
+}
+
 QVariant EmojiTextDocument::loadResource(int type, const QUrl& name)
 {
-    if (type == QTextDocument::ImageResource
-        && name.scheme() == QStringLiteral("emoji")) {
-        // 이모지 ID에는 슬래시가 포함될 수 있음 (예: YouTube의
-        // "UCkszU2WH9gy1mb0dV-11UJg/6_cfY8HJH8bV5QS5yYDYDg"). QUrl이 이를
-        // host/path로 분할하므로 두 조각을 그대로 이어붙여 원본 ID 복원.
-        const QString host = name.host();
-        const QString path = name.path();  // path가 "/"로 시작 (host가 있을 때)
-        QString id;
-        if (!host.isEmpty()) {
-            id = path.isEmpty() ? host : host + path;
-        } else {
-            id = path.startsWith('/') ? path.mid(1) : path;
-        }
-        if (!id.isEmpty() && m_cache && m_cache->contains(id)) {
-            return QVariant(m_cache->get(id));
-        }
-        // 캐시 미스 — 빈 QVariant 반환. 비동기 로드 완료 시
-        // EmojiImageCache::imageReady로 viewport 재페인트 → 다시 loadResource
-        // 호출되어 캐시 히트 처리.
+    if (type != QTextDocument::ImageResource
+        || name.scheme() != QStringLiteral("emoji")) {
+        return QTextDocument::loadResource(type, name);
+    }
+
+    const QString id = extractEmojiId(name);
+    if (id.isEmpty()) {
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] empty-id url=" << name.toString();
         return QVariant();
     }
-    return QTextDocument::loadResource(type, name);
+
+    // 캐시 히트
+    if (m_cache && m_cache->contains(id)) {
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] hit id=" << id;
+        return QVariant(m_cache->get(id));
+    }
+
+    // 캐시 미스 — id→url 맵에서 조회해 자동 ensureLoaded 트리거
+    if (m_cache && m_idToUrl.contains(id)) {
+        const QString url = m_idToUrl.value(id);
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss+load id=" << id << "url=" << url;
+        m_cache->ensureLoaded(id, url);
+    } else {
+        if (g_traceEnabled) qInfo().noquote() << "[EMOJI-RESOLVE] miss-no-url id=" << id;
+    }
+    // 로드 완료 후 imageReady → viewport 재페인트 시 이 함수 재호출 → 히트 처리.
+    return QVariant();
 }
