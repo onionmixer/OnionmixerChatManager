@@ -161,6 +161,11 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     m_chatDelegate = new ChatBubbleDelegate(this);
     m_chatDelegate->setEmojiCache(m_emojiCache);
     setupUi();
+    // 비동기 이모지 로드 완료 시 messenger 뷰·방송창 재페인트로 broken-image → 실제 이미지 전환
+    connect(m_emojiCache, &EmojiImageCache::imageReady, this, [this](const QString&) {
+        if (m_chatListView) m_chatListView->viewport()->update();
+        if (m_broadcastWindow) m_broadcastWindow->update();
+    });
     // ChatDisplayController created after setupUi (needs widget pointers)
     m_chatController = new ChatDisplayController(m_chatStack, m_chatListView, m_tblChat,
         m_chatModel, m_chatDelegate, m_emojiCache, &m_snapshot, this);

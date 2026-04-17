@@ -2,13 +2,13 @@
 #include "core/EmojiImageCache.h"
 #include "core/PlatformTraits.h"
 #include "ui/ChatMessageModel.h"
+#include "ui/EmojiTextDocument.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QBuffer>
 #include <QPainter>
 #include <QPainterPath>
-#include <QTextDocument>
 
 namespace {
 constexpr qreal kOutlineWidthPx = 1.5;
@@ -156,8 +156,10 @@ void ChatBubbleDelegate::paint(QPainter* painter, const QStyleOptionViewItem& op
     const QFont mf = messageFont();
     const QString html = richText.isEmpty() ? messageText.toHtmlEscaped() : richText;
 
-    // Use QTextDocument for RichText rendering (supports word wrap + inline images)
-    QTextDocument doc;
+    // EmojiTextDocument: <img src='emoji://{id}'> placeholder를 EmojiImageCache
+    // 기반으로 해석. 캐시 미스면 비어 있고, 이후 imageReady 시 viewport update
+    // 로 재페인트되어 자연 복구.
+    EmojiTextDocument doc(m_emojiCache);
     doc.setDefaultFont(mf);
     doc.setTextWidth(bodyWidth);
     doc.setHtml(html);
@@ -217,7 +219,7 @@ QSize ChatBubbleDelegate::sizeHint(const QStyleOptionViewItem& option,
     const QString messageText = index.data(ChatMessageModel::MessageTextRole).toString();
     const QString html = richText.isEmpty() ? messageText.toHtmlEscaped() : richText;
 
-    QTextDocument doc;
+    EmojiTextDocument doc(m_emojiCache);
     doc.setDefaultFont(messageFont());
     doc.setTextWidth(qMax(bodyWidth, 100));
     doc.setHtml(html);

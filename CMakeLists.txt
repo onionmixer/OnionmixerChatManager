@@ -102,6 +102,8 @@ add_executable(OnionmixerChatManagerQt5
     src/ui/ViewerCountStyle.h
     src/ui/ChatBubbleDelegate.cpp
     src/ui/ChatBubbleDelegate.h
+    src/ui/EmojiTextDocument.cpp
+    src/ui/EmojiTextDocument.h
     src/ui/ChatDisplayController.cpp
     src/ui/ChatDisplayController.h
     src/ui/ChatBubbleWidget.cpp
