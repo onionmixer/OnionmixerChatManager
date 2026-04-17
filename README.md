@@ -210,6 +210,20 @@ account_label=
 수동 우회:
 - `live_video_id_override`에 watch URL 또는 raw `videoId`를 넣으면 자동 탐색보다 우선 사용합니다.
 
+#### 다중 채널(브랜드 계정) 주의사항
+
+하나의 Google 계정에 여러 YouTube 채널(개인 채널 + 브랜드 계정 채널 등)이 연결돼 있으면, OAuth 브라우저 인증 단계에서 **채널 선택 화면**이 나타납니다. 이때 **실제 라이브 방송을 진행하는 채널을 반드시 선택**해야 합니다.
+
+라이브 중이 아닌 채널을 선택한 경우의 증상:
+- `channels.mine`은 해당 채널 정보로 정상 동기화됨 (`[YOUTUBE-PROFILE] channels.mine synchronized channelId=... handle=@xxx`)
+- `liveBroadcasts.list`에서 `The user is not enabled for live streaming.` 반환
+- `search.list forMine=true`에서 `invalid argument` 반환
+- 결국 `오프라인 / No owned recent video result`로 귀결되며 실제 라이브를 잡지 못함
+
+해결:
+1. 토큰 삭제 후 재인증: Configuration → YouTube → `Delete Token` → `Re-Auth Browser` → 브라우저에서 **라이브 채널** 선택
+2. 즉시 우회: Configuration → YouTube → `Live Video ID Override`에 watch URL 또는 `videoId` (예: `rjNcK2Otr6g`) 입력 → Apply. 이 경로는 discovery API를 완전히 건너뛰므로 다중 채널 문제와 무관하게 동작합니다.
+
 인증 오류 확인 항목:
 - `client_id`가 실제 OAuth Client ID인지
 - `client_secret`이 `GOCSPX-...` 형태로 채워져 있는지 (Desktop app 타입도 필수)
@@ -241,6 +255,15 @@ account_label=
    - 필요한 권한(scope) 선택 — 채팅 수신에 필요한 `chat:read` 등 해당 항목
 3. 등록 완료 후 발급된 **Client ID**와 **Client Secret**을 `config.ini`의 `[chzzk]` 섹션에 붙여넣기
 4. 필요 시 치지직 개발자 센터의 최신 가이드에서 endpoint / scope 변경 여부 확인
+
+#### Channel ID 확인
+
+본인 채널이라면 `channel_id`는 비워둬도 됩니다. OAuth 인증이 성공하면 앱이 `users/me` 응답으로 자동 동기화합니다 (로그에 `[CHZZK-PROFILE] users/me synchronized channelId=... channelName=...` 형태로 표시).
+
+타인 채널을 지정하려는 경우 수동 입력 형식:
+- 치지직 채널 페이지 URL: `https://chzzk.naver.com/{채널ID}` 또는 `https://chzzk.naver.com/live/{채널ID}`
+- `{채널ID}` 부분이 **32자리 16진수 문자열** (예: `592df5045eb7d5f8d8bb5d43371a56c4`)
+- `config.ini [chzzk] channel_id=` 항목에 하이픈·접두어 없이 그 값만 넣습니다.
 
 ## 7. UI 개요
 
