@@ -22,7 +22,7 @@ void ChatterStatsManager::recordChatter(const UnifiedChatMessage& message, const
     ChatterListEntry entry = m_stats.value(key);
     const bool isNew = (entry.count == 0);
     if (isNew) {
-        if (m_stats.size() >= BotManager::Limits::kChatterStatsMax) {
+        if (m_stats.size() >= OnionmixerChatManager::Limits::kChatterStatsMax) {
             return;
         }
         entry.platform = message.platform;
@@ -62,7 +62,7 @@ void ChatterStatsManager::rebuildFromMessages(const QVector<UnifiedChatMessage>&
         }
     }
 
-    const int kMax = BotManager::Limits::kChatterStatsMax;
+    const int kMax = OnionmixerChatManager::Limits::kChatterStatsMax;
     if (updated.size() > kMax) {
         QVector<QPair<QDateTime, QString>> byAge;
         byAge.reserve(updated.size());

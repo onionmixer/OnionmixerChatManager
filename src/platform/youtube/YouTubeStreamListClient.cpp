@@ -1,7 +1,7 @@
 #include "platform/youtube/YouTubeStreamListClient.h"
 #include "platform/youtube/YouTubeChatMessageParser.h"
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
 #include "stream_list.grpc.pb.h"
 #include "stream_list.pb.h"
 
@@ -15,7 +15,7 @@
 #include <thread>
 
 namespace {
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
 QString streamErrorCodeName(::grpc::StatusCode code)
 {
     switch (code) {
@@ -57,7 +57,7 @@ QString streamErrorCodeName(::grpc::StatusCode code)
 
 QString streamListSupportMessage()
 {
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
     return QStringLiteral("gRPC streamList transport available");
 #else
     return QStringLiteral("gRPC streamList transport not built in this binary");
@@ -67,7 +67,7 @@ QString streamListSupportMessage()
 
 struct YouTubeStreamListClient::Private {
     std::mutex mutex;
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
     std::shared_ptr<::grpc::ClientContext> context;
 #endif
     std::thread worker;
@@ -89,7 +89,7 @@ YouTubeStreamListClient::~YouTubeStreamListClient()
 
 bool YouTubeStreamListClient::isSupported() const
 {
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
     return true;
 #else
     return false;
@@ -123,7 +123,7 @@ void YouTubeStreamListClient::start(const QString& accessToken,
         return;
     }
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
     const quint64 generation = m_d->generation.fetch_add(1) + 1;
     m_d->stopRequested.store(false);
     m_d->running.store(true);
@@ -241,7 +241,7 @@ void YouTubeStreamListClient::stop()
 {
     m_d->stopRequested.store(true);
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
     {
         std::lock_guard<std::mutex> lock(m_d->mutex);
         if (m_d->context) {

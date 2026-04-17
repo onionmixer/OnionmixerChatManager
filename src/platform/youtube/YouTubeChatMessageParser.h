@@ -5,14 +5,14 @@
 
 #include <QJsonObject>
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
 #include "stream_list.pb.h"
 #endif
 
 UnifiedChatMessage parseYouTubeChatMessageJson(const QJsonObject& item);
 UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const QString& rendererType);
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
 UnifiedChatMessage parseYouTubeChatMessageProto(const ::youtube::api::v3::LiveChatMessage& item);
 #endif
 

@@ -546,7 +546,7 @@ void MainWindow::setupUi()
     m_txtEventLog = new QTextEdit(root);
     m_txtEventLog->setReadOnly(true);
     m_txtEventLog->setObjectName(QStringLiteral("txtEventLog"));
-    m_txtEventLog->document()->setMaximumBlockCount(BotManager::Limits::kEventLogMaxBlocks);
+    m_txtEventLog->document()->setMaximumBlockCount(OnionmixerChatManager::Limits::kEventLogMaxBlocks);
 
     auto* bottomWrap = new QWidget(root);
     auto* bottomLayout = new QVBoxLayout(bottomWrap);
@@ -853,7 +853,7 @@ QWidget* MainWindow::setupComposer(QWidget* root)
 
 void MainWindow::retranslateUi()
 {
-    setWindowTitle(tr("BotManager Qt5"));
+    setWindowTitle(tr("OnionmixerChatManager Qt5"));
     if (m_lblStateCaption) {
         m_lblStateCaption->setText(tr("State:"));
     }
@@ -1283,7 +1283,7 @@ void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QStr
             return;
         }
         m_recentMessageIds.insert(msgId);
-        if (m_recentMessageIds.size() > BotManager::Limits::kRecentMessageIdsMax) {
+        if (m_recentMessageIds.size() > OnionmixerChatManager::Limits::kRecentMessageIdsMax) {
             m_recentMessageIds.clear();
             m_recentMessageIds.insert(msgId);
         }
@@ -1521,7 +1521,7 @@ void MainWindow::maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& m
         return;
     }
 
-    if (m_youtubeAuthorHandleLookupQueue.size() >= BotManager::Limits::kAuthorLookupQueueMax) {
+    if (m_youtubeAuthorHandleLookupQueue.size() >= OnionmixerChatManager::Limits::kAuthorLookupQueueMax) {
         return;
     }
     m_youtubeAuthorHandlePending.insert(authorId);
@@ -1596,7 +1596,7 @@ void MainWindow::flushYouTubeAuthorHandleLookupQueue()
                 }
                 const QString normalized = normalizeYouTubeHandle(customUrl);
                 if (!channelId.isEmpty() && !normalized.isEmpty()) {
-                    if (m_youtubeAuthorHandleCache.size() > BotManager::Limits::kAuthorHandleCacheMax) {
+                    if (m_youtubeAuthorHandleCache.size() > OnionmixerChatManager::Limits::kAuthorHandleCacheMax) {
                         m_youtubeAuthorHandleCache.clear();
                     }
                     m_youtubeAuthorHandleCache.insert(channelId, normalized);
@@ -1813,7 +1813,7 @@ void MainWindow::executeAction(const QString& actionId)
 
     m_txtEventLog->append(QStringLiteral("[ACTION-FAIL] %1 code=%2 message=%3")
                               .arg(actionId, result.errorCode, result.message));
-    statusBar()->showMessage(tr("Action failed: %1 (%2)").arg(actionId, result.errorCode), BotManager::Timings::kStatusBarDisplayMs);
+    statusBar()->showMessage(tr("Action failed: %1 (%2)").arg(actionId, result.errorCode), OnionmixerChatManager::Timings::kStatusBarDisplayMs);
 }
 
 void MainWindow::updateComposerUiState()
@@ -1895,7 +1895,7 @@ void MainWindow::pushComposerHistory(const QString& text)
         return;
     }
     m_sendHistory.push_back(normalized);
-    while (m_sendHistory.size() > BotManager::Limits::kSendHistoryMax) {
+    while (m_sendHistory.size() > OnionmixerChatManager::Limits::kSendHistoryMax) {
         m_sendHistory.removeFirst();
     }
     m_sendHistoryIndex = m_sendHistory.size();
@@ -2009,12 +2009,12 @@ void MainWindow::initializeLiveProbe()
     refreshLiveBroadcastIndicators();
 
     m_liveProbeTimer = new QTimer(this);
-    m_liveProbeTimer->setInterval(BotManager::Timings::kLiveProbeIntervalMs);
+    m_liveProbeTimer->setInterval(OnionmixerChatManager::Timings::kLiveProbeIntervalMs);
     connect(m_liveProbeTimer, &QTimer::timeout, this, &MainWindow::onLiveProbeTimeout);
     m_liveProbeTimer->start();
 
     m_youtubeViewerCountTimer = new QTimer(this);
-    m_youtubeViewerCountTimer->setInterval(BotManager::Timings::kYouTubeViewerCountIntervalMs);
+    m_youtubeViewerCountTimer->setInterval(OnionmixerChatManager::Timings::kYouTubeViewerCountIntervalMs);
     connect(m_youtubeViewerCountTimer, &QTimer::timeout, this, &MainWindow::requestYouTubeViewerCount);
 
     onLiveProbeTimeout();
@@ -2460,7 +2460,7 @@ void MainWindow::onPlatformConfigValidationRequested(PlatformId platform, const 
 
     const QString target = platform == PlatformId::YouTube ? QStringLiteral("YouTube") : QStringLiteral("CHZZK");
     m_txtEventLog->append(QStringLiteral("[CONFIG-TEST] %1 -> %2").arg(target, ok ? QStringLiteral("OK") : QStringLiteral("FAIL")));
-    statusBar()->showMessage(tr("%1 config test: %2").arg(target, ok ? tr("OK") : tr("FAIL")), BotManager::Timings::kStatusBarDisplayMs);
+    statusBar()->showMessage(tr("%1 config test: %2").arg(target, ok ? tr("OK") : tr("FAIL")), OnionmixerChatManager::Timings::kStatusBarDisplayMs);
 }
 
 QMap<PlatformId, bool> MainWindow::currentConnections() const

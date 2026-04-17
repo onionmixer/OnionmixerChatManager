@@ -130,7 +130,7 @@ QNetworkRequest YouTubeLiveDiscovery::createWebScrapingRequest(const QUrl& url) 
     QNetworkRequest req(url);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
+        QStringLiteral("Mozilla/5.0 OnionmixerChatManagerQt5/1.0 (+YouTubeLiveResolver)"));
     return req;
 }
 
@@ -138,7 +138,7 @@ int YouTubeLiveDiscovery::setupRequestGuard(QNetworkReply* reply)
 {
     const int gen = *m_generation;
     QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(BotManager::Timings::kHttpRequestTimeoutMs, this, [this, gen, guard]() {
+    QTimer::singleShot(OnionmixerChatManager::Timings::kHttpRequestTimeoutMs, this, [this, gen, guard]() {
         if (gen != *m_generation || !guard || guard->isFinished()) {
             return;
         }
@@ -454,7 +454,7 @@ void YouTubeLiveDiscovery::requestActiveBroadcast()
             if (quotaOrRate) {
                 emit connectionReady();
                 m_lastLiveStateCode.clear();
-                emit requestTick(BotManager::Timings::kQuotaBackoffMs);
+                emit requestTick(OnionmixerChatManager::Timings::kQuotaBackoffMs);
                 emit progress(QStringLiteral("LIVE_DISCOVERY_FAILED"), message);
                 reply->deleteLater(); return;
             }
@@ -469,7 +469,7 @@ void YouTubeLiveDiscovery::requestActiveBroadcast()
             }
             emit connectionReady();
             m_lastLiveStateCode.clear();
-            emit requestTick(liveNotEnabled ? BotManager::Timings::kQuotaBackoffMs : connectDiscoveryDelayMs());
+            emit requestTick(liveNotEnabled ? OnionmixerChatManager::Timings::kQuotaBackoffMs : connectDiscoveryDelayMs());
             emit progress(QStringLiteral("LIVE_DISCOVERY_FAILED"), message);
             reply->deleteLater(); return;
         }
@@ -531,7 +531,7 @@ void YouTubeLiveDiscovery::requestActiveBroadcast()
         emit progress(QStringLiteral("INFO_LIVECHAT_ID_READY"), QStringLiteral("YouTube liveChatId resolved via liveBroadcasts."));
         m_bootstrapDiscoverAttempts = 10;
         emit discoveryCompleted(liveChatId, broadcastVideoId);
-        emit requestTick(BotManager::Timings::kImmediateRetickMs);
+        emit requestTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
         reply->deleteLater();
     });
 }
@@ -701,7 +701,7 @@ void YouTubeLiveDiscovery::requestRecentVideoDetailsForLiveChat(const QStringLis
             m_bootstrapDiscoverAttempts = 10;
             emit connectionReady();
             emit discoveryCompleted(liveChatId, candidateVideoId);
-            emit requestTick(BotManager::Timings::kImmediateRetickMs);
+            emit requestTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
             reply->deleteLater(); return;
         }
         emit connectionReady(); ++m_bootstrapDiscoverAttempts;
@@ -749,7 +749,7 @@ void YouTubeLiveDiscovery::requestVideoDetailsForLiveChat(const QString& videoId
             m_bootstrapDiscoverAttempts = 10;
             emit connectionReady();
             emit discoveryCompleted(liveChatId, videoId.trimmed());
-            emit requestTick(BotManager::Timings::kImmediateRetickMs);
+            emit requestTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
             reply->deleteLater(); return;
         }
         emit connectionReady(); ++m_bootstrapDiscoverAttempts;

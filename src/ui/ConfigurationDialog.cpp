@@ -607,7 +607,7 @@ void ConfigurationDialog::onApplyClicked()
     }
 
     emit configApplyRequested(snapshot);
-        m_statusBar->showMessage(tr("Configuration applied."), BotManager::Timings::kStatusBarDisplayMs);
+        m_statusBar->showMessage(tr("Configuration applied."), OnionmixerChatManager::Timings::kStatusBarDisplayMs);
 }
 
 void ConfigurationDialog::onYouTubeTestConfigClicked()

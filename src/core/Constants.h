@@ -1,7 +1,7 @@
-#ifndef BOTMANAGER_CONSTANTS_H
-#define BOTMANAGER_CONSTANTS_H
+#ifndef ONIONMIXERCHATMANAGER_CONSTANTS_H
+#define ONIONMIXERCHATMANAGER_CONSTANTS_H
 
-namespace BotManager {
+namespace OnionmixerChatManager {
 
 namespace Timings {
     constexpr int kImmediateRetickMs = 100;
@@ -30,6 +30,6 @@ namespace Limits {
     constexpr int kEmojiImageCacheMax = 500;
 }
 
-} // namespace BotManager
+} // namespace OnionmixerChatManager
 
-#endif // BOTMANAGER_CONSTANTS_H
+#endif // ONIONMIXERCHATMANAGER_CONSTANTS_H

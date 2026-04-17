@@ -207,7 +207,7 @@ void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
         m_streamFailureCount = 0;
         m_streamFallbackUntilUtc = QDateTime();
         m_streamListClient->stop();
-        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
         return;
     }
 
@@ -215,17 +215,17 @@ void YouTubeAdapter::applyRuntimeAccessToken(const QString& accessToken)
         m_webChatClient->stop();
         m_webChatFailureCount = 0;
         m_webChatFallbackUntilUtc = QDateTime();
-        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
         return;
     }
 
     if (m_liveChatId.isEmpty()) {
         setLiveStateChecking(QStringLiteral("Token updated, re-checking live state."));
-        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
         return;
     }
 
-    scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
+    scheduleNextTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
 }
 
 bool YouTubeAdapter::shouldUseStreamListTransport() const
@@ -279,7 +279,7 @@ void YouTubeAdapter::startStreamListTransport()
         m_streamListClient->stop();
         emit error(platformId(), QStringLiteral("YT_STREAM_FALLBACK_POLLING"),
             QStringLiteral("streamList startup timeout; switching to polling fallback for 300s."));
-        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
     });
 }
 
@@ -308,7 +308,7 @@ void YouTubeAdapter::publishReceivedMessage(UnifiedChatMessage message)
     }
 
     m_seenMessageIds.insert(messageId);
-    if (m_seenMessageIds.size() > BotManager::Limits::kYouTubeSeenMessageIdsMax) {
+    if (m_seenMessageIds.size() > OnionmixerChatManager::Limits::kYouTubeSeenMessageIdsMax) {
         m_seenMessageIds.clear();
         m_seenMessageIds.insert(messageId);
     }
@@ -415,7 +415,7 @@ void YouTubeAdapter::onStreamListEnded(const QString& reason)
     m_streamFailureCount = 0;
     m_streamTransportReady = false;
     setLiveStateOffline(detail);
-    scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
+    scheduleNextTick(OnionmixerChatManager::Timings::kDefaultPollIntervalMs);
 }
 
 void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& detail)
@@ -452,7 +452,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_nextWebFallbackAllowedAtUtc = QDateTime();
         m_announcedLiveChatPending = false;
         setLiveStateOffline(detail);
-        scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kDefaultPollIntervalMs);
         return;
     }
 
@@ -461,7 +461,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_streamResumeToken.clear();
         m_streamFailureCount = 0;
         m_streamTransportReady = false;
-        scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kQuotaBackoffMs);
         return;
     }
 
@@ -471,7 +471,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_streamFallbackUntilUtc = QDateTime();
         emit error(platformId(), QStringLiteral("YT_STREAM_QUOTA_BACKOFF"),
             QStringLiteral("streamList quota/rate limit detected; keeping stream transport in backoff for 300s."));
-        scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kQuotaBackoffMs);
         return;
     }
 
@@ -483,7 +483,7 @@ void YouTubeAdapter::onStreamListFailed(const QString& code, const QString& deta
         m_streamTransportReady = false;
         emit error(platformId(), QStringLiteral("YT_STREAM_FALLBACK_POLLING"),
             QStringLiteral("streamList failed repeatedly; switching to polling fallback for 300s."));
-        scheduleNextTick(BotManager::Timings::kImmediateRetickMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kImmediateRetickMs);
         return;
     }
 
@@ -555,9 +555,9 @@ void YouTubeAdapter::onWebChatFailed(const QString& code, const QString& detail)
                 .arg(m_webChatFailureCount));
     }
     setLiveStateChecking(QStringLiteral("Retrying chat connection..."));
-    const int backoffMs = qMin(BotManager::Timings::kDefaultPollIntervalMs * m_webChatFailureCount,
-                              BotManager::Timings::kDiscoveryBackoffMaxMs);
-    scheduleNextTick(qMax(backoffMs, BotManager::Timings::kDefaultPollIntervalMs));
+    const int backoffMs = qMin(OnionmixerChatManager::Timings::kDefaultPollIntervalMs * m_webChatFailureCount,
+                              OnionmixerChatManager::Timings::kDiscoveryBackoffMaxMs);
+    scheduleNextTick(qMax(backoffMs, OnionmixerChatManager::Timings::kDefaultPollIntervalMs));
 }
 
 void YouTubeAdapter::onWebChatEnded(const QString& reason)
@@ -574,7 +574,7 @@ void YouTubeAdapter::onWebChatEnded(const QString& reason)
     m_announcedLiveChatPending = false;
     m_nextWebFallbackAllowedAtUtc = QDateTime();
     setLiveStateOffline(reason);
-    scheduleNextTick(BotManager::Timings::kDiscoveryRetryMs);
+    scheduleNextTick(OnionmixerChatManager::Timings::kDiscoveryRetryMs);
 }
 
 void YouTubeAdapter::emitLiveStateInfo(const QString& code, const QString& detail)
@@ -780,7 +780,7 @@ void YouTubeAdapter::onLoopTick()
 void YouTubeAdapter::requestLiveChatMessages()
 {
     if (m_accessToken.isEmpty() || m_liveChatId.isEmpty()) {
-        scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kDefaultPollIntervalMs);
         return;
     }
 
@@ -830,7 +830,7 @@ void YouTubeAdapter::requestLiveChatMessages()
                 m_nextWebFallbackAllowedAtUtc = QDateTime();
                 m_announcedLiveChatPending = false;
                 setLiveStateChecking(QStringLiteral("liveChatId expired; re-checking live state."));
-                scheduleNextTick(BotManager::Timings::kDefaultPollIntervalMs);
+                scheduleNextTick(OnionmixerChatManager::Timings::kDefaultPollIntervalMs);
                 reply->deleteLater();
                 return;
             }
@@ -841,7 +841,7 @@ void YouTubeAdapter::requestLiveChatMessages()
                 m_nextWebFallbackAllowedAtUtc = QDateTime();
                 m_announcedLiveChatPending = false;
                 setLiveStateOffline(QStringLiteral("Live chat unavailable"));
-                scheduleNextTick(BotManager::Timings::kDiscoveryRetryMs);
+                scheduleNextTick(OnionmixerChatManager::Timings::kDiscoveryRetryMs);
                 emit error(platformId(), QStringLiteral("LIVE_CHAT_UNAVAILABLE"), message);
                 reply->deleteLater();
                 return;
@@ -855,7 +855,7 @@ void YouTubeAdapter::requestLiveChatMessages()
             }
             if (isQuotaExceededMessage(message) || isQuotaOrRateReason(reason)) {
                 m_lastLiveStateCode.clear();
-                scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
+                scheduleNextTick(OnionmixerChatManager::Timings::kQuotaBackoffMs);
                 emit error(platformId(), QStringLiteral("CHAT_RATE_LIMIT"), message);
                 reply->deleteLater();
                 return;
@@ -955,7 +955,7 @@ QNetworkRequest YouTubeAdapter::createWebScrapingRequest(const QUrl& url) const
     QNetworkRequest req(url);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     req.setHeader(QNetworkRequest::UserAgentHeader,
-        QStringLiteral("Mozilla/5.0 BotManagerQt5/1.0 (+YouTubeLiveResolver)"));
+        QStringLiteral("Mozilla/5.0 OnionmixerChatManagerQt5/1.0 (+YouTubeLiveResolver)"));
     return req;
 }
 
@@ -977,7 +977,7 @@ void YouTubeAdapter::handleRequestFailure(const QString& code, const QString& me
     }
     if (isQuotaExceededMessage(message)) {
         m_lastLiveStateCode.clear();
-        scheduleNextTick(BotManager::Timings::kQuotaBackoffMs);
+        scheduleNextTick(OnionmixerChatManager::Timings::kQuotaBackoffMs);
     } else {
         m_lastLiveStateCode.clear();
         scheduleNextTick(discoveryBackoffDelayMs(m_bootstrapDiscoverAttempts));

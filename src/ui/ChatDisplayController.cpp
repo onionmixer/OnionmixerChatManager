@@ -41,7 +41,7 @@ void ChatDisplayController::appendMessage(const UnifiedChatMessage& message, con
             return;
         }
         m_recentMessageIds.insert(msgId);
-        if (m_recentMessageIds.size() > BotManager::Limits::kRecentMessageIdsMax) {
+        if (m_recentMessageIds.size() > OnionmixerChatManager::Limits::kRecentMessageIdsMax) {
             m_recentMessageIds.clear();
             m_recentMessageIds.insert(msgId);
         }

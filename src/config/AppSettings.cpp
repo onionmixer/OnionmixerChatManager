@@ -83,7 +83,7 @@ QString AppSettings::resolveConfigDir(const QStringList& args)
         }
     }
 
-    const QString envDir = QString::fromUtf8(qgetenv("BOTMANAGER_CONFIG_DIR")).trimmed();
+    const QString envDir = QString::fromUtf8(qgetenv("ONIONMIXERCHATMANAGER_CONFIG_DIR")).trimmed();
     if (!envDir.isEmpty() && QDir(envDir).exists()) {
         return QDir(envDir).absolutePath();
     }

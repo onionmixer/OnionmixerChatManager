@@ -537,8 +537,8 @@ copied_at_local: %2
 <context>
     <name>MainWindow</name>
     <message>
-        <source>BotManager Qt5</source>
-        <translation>BotManager Qt5</translation>
+        <source>OnionmixerChatManager Qt5</source>
+        <translation>OnionmixerChatManager Qt5</translation>
     </message>
     <message>
         <source>State:</source>

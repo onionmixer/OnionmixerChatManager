@@ -1,4 +1,4 @@
-# BotManager Qt5
+# OnionmixerChatManager Qt5
 
 Qt5 기반 YouTube + NAVER CHZZK 통합 채팅/운영 도구입니다.
 
@@ -37,7 +37,7 @@ cmake --build build -j4
 실행:
 
 ```bash
-./build/BotManagerQt5
+./build/OnionmixerChatManagerQt5
 ```
 
 테스트(Qt5Test가 있을 때):
@@ -53,15 +53,15 @@ ctest --test-dir build --output-on-failure
 
 config 디렉토리 해석 우선순위:
 1. CLI 인수: `--config-dir /path/to/config`
-2. 환경변수: `BOTMANAGER_CONFIG_DIR=/path/to/config`
+2. 환경변수: `ONIONMIXERCHATMANAGER_CONFIG_DIR=/path/to/config`
 3. 기본값: `{실행파일경로}/config`
 
 예시:
 
 ```bash
-./build/BotManagerQt5
-./build/BotManagerQt5 --config-dir /home/user/botmanager-config
-BOTMANAGER_CONFIG_DIR=/tmp/botmanager ./build/BotManagerQt5
+./build/OnionmixerChatManagerQt5
+./build/OnionmixerChatManagerQt5 --config-dir /home/user/onionmixerchatmanager-config
+ONIONMIXERCHATMANAGER_CONFIG_DIR=/tmp/onionmixerchatmanager ./build/OnionmixerChatManagerQt5
 ```
 
 config 디렉토리 안에 아래 파일이 사용됩니다.
@@ -256,9 +256,9 @@ YouTube / CHZZK는 일반 연결 상태 외에 runtime phase를 별도로 가집
 ## 10. 번역
 
 번역 파일:
-- `translations/botmanager_ko_KR.ts`
-- `translations/botmanager_en_US.ts`
-- `translations/botmanager_ja_JP.ts`
+- `translations/onionmixerchatmanager_ko_KR.ts`
+- `translations/onionmixerchatmanager_en_US.ts`
+- `translations/onionmixerchatmanager_ja_JP.ts`
 
 Qt `LinguistTools`가 있으면 `.qm` 빌드가 활성화됩니다.
 

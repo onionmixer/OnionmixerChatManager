@@ -143,7 +143,7 @@ void ChzzkAdapter::start(const PlatformSettings& settings)
         m_emojiResolver->loadEmojiPacks(m_channelId);
     }
     if (m_connectWatchdog) {
-        m_connectWatchdog->start(BotManager::Timings::kChzzkConnectWatchdogMs);
+        m_connectWatchdog->start(OnionmixerChatManager::Timings::kChzzkConnectWatchdogMs);
     }
 
     requestSessionAuth();
@@ -225,7 +225,7 @@ void ChzzkAdapter::requestSessionAuth()
 
     const int gen = m_socketGeneration;
     QPointer<QNetworkReply> guard(reply);
-    QTimer::singleShot(BotManager::Timings::kChzzkSessionAuthTimeoutMs, this, [this, gen, guard]() {
+    QTimer::singleShot(OnionmixerChatManager::Timings::kChzzkSessionAuthTimeoutMs, this, [this, gen, guard]() {
         if (gen != m_socketGeneration || m_stopping || !guard || guard->isFinished()) {
             return;
         }
@@ -549,7 +549,7 @@ void ChzzkAdapter::onSocketDisconnected()
         m_sessionKey.clear();
         emit error(platformId(), QStringLiteral("INFO_CHZZK_RECONNECTING"),
             QStringLiteral("Socket disconnected, attempting reconnection in 3 seconds."));
-        QTimer::singleShot(BotManager::Timings::kChzzkReconnectDelayMs, this, [this]() {
+        QTimer::singleShot(OnionmixerChatManager::Timings::kChzzkReconnectDelayMs, this, [this]() {
             if (m_stopping) {
                 return;
             }
@@ -796,7 +796,7 @@ void ChzzkAdapter::processSocketIoEvent(const QString& eventName, const QJsonVal
                 return;
             }
             m_seenMessageIds.insert(msgId);
-            if (m_seenMessageIds.size() > BotManager::Limits::kChzzkSeenMessageIdsMax) {
+            if (m_seenMessageIds.size() > OnionmixerChatManager::Limits::kChzzkSeenMessageIdsMax) {
                 m_seenMessageIds.clear();
                 m_seenMessageIds.insert(msgId);
             }

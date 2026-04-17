@@ -204,7 +204,7 @@ ParsedYouTubeSnippet parseJsonSnippet(const QJsonObject& snippet)
     return parsed;
 }
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
 QString protoTypeToString(::youtube::api::v3::LiveChatMessageSnippet_TypeWrapper_Type type)
 {
     using Type = ::youtube::api::v3::LiveChatMessageSnippet_TypeWrapper_Type;
@@ -470,7 +470,7 @@ UnifiedChatMessage parseInnerTubeChatRenderer(const QJsonObject& renderer, const
     return msg;
 }
 
-#if BOTMANAGER_HAS_YT_STREAMLIST
+#if ONIONMIXERCHATMANAGER_HAS_YT_STREAMLIST
 UnifiedChatMessage parseYouTubeChatMessageProto(const ::youtube::api::v3::LiveChatMessage& item)
 {
     QString authorId;

@@ -13,7 +13,7 @@ QString g_currentLanguage = QStringLiteral("en_US");
 
 QString qmBaseNameForLanguage(const QString& language)
 {
-    return QStringLiteral("botmanager_%1").arg(language);
+    return QStringLiteral("onionmixerchatmanager_%1").arg(language);
 }
 
 QStringList translationSearchDirs()
