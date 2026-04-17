@@ -24,7 +24,6 @@
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QDebug>
 #include <QDesktopServices>
 #include <QEvent>
 #include <QFrame>
@@ -2474,21 +2473,15 @@ QMap<PlatformId, bool> MainWindow::currentConnections() const
 
 void MainWindow::requestYouTubeViewerCount()
 {
-    auto logLine = [](const QString& line) {
-        qInfo().noquote() << line;
-    };
-
     if (m_awaitingYouTubeViewerCount) return;
 
     const QString videoId = m_youtubeAdapter.currentVideoId().trimmed();
     if (videoId.isEmpty()) {
-        logLine(QStringLiteral("[VIEWERS-YT] skip: videoId empty"));
         updateViewerCount(PlatformId::YouTube, -1);
         return;
     }
     TokenRecord record;
     if (!m_tokenManager.readToken(PlatformId::YouTube, &record) || record.accessToken.trimmed().isEmpty()) {
-        logLine(QStringLiteral("[VIEWERS-YT] skip: access token missing"));
         return;
     }
 
@@ -2502,13 +2495,10 @@ void MainWindow::requestYouTubeViewerCount()
     req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(record.accessToken.trimmed()).toUtf8());
 
     QNetworkReply* reply = m_networkAccessManager.get(req);
-    if (!reply) {
-        logLine(QStringLiteral("[VIEWERS-YT] skip: failed to create reply"));
-        return;
-    }
+    if (!reply) return;
     m_awaitingYouTubeViewerCount = true;
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, videoId, logLine]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         m_awaitingYouTubeViewerCount = false;
 
         if (!m_youtubeViewerCountTimer || !m_youtubeViewerCountTimer->isActive()) {
@@ -2516,45 +2506,21 @@ void MainWindow::requestYouTubeViewerCount()
             return;
         }
 
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QNetworkReply::NetworkError netErr = reply->error();
         const QByteArray body = reply->readAll();
         QJsonObject obj;
         const QJsonDocument doc = QJsonDocument::fromJson(body);
         if (doc.isObject()) obj = doc.object();
 
-        if (netErr != QNetworkReply::NoError || httpStatus < 200 || httpStatus >= 300) {
-            const QString apiMsg = obj.value(QStringLiteral("error")).toObject()
-                .value(QStringLiteral("message")).toString();
-            logLine(QStringLiteral("[VIEWERS-YT] http=%1 err=%2 msg=%3")
-                .arg(httpStatus).arg(netErr)
-                .arg(apiMsg.isEmpty() ? reply->errorString() : apiMsg));
-            updateViewerCount(PlatformId::YouTube, -1);
-            reply->deleteLater();
-            return;
-        }
-
         int viewers = -1;
         const QJsonArray items = obj.value(QStringLiteral("items")).toArray();
-        if (items.isEmpty()) {
-            logLine(QStringLiteral("[VIEWERS-YT] empty items for videoId=%1").arg(videoId));
-        } else {
+        if (!items.isEmpty()) {
             const QJsonObject details = items.first().toObject()
                 .value(QStringLiteral("liveStreamingDetails")).toObject();
-            if (details.isEmpty()) {
-                logLine(QStringLiteral("[VIEWERS-YT] liveStreamingDetails missing for videoId=%1").arg(videoId));
-            } else if (!details.contains(QStringLiteral("concurrentViewers"))) {
-                logLine(QStringLiteral("[VIEWERS-YT] concurrentViewers field absent (hidden or not live) videoId=%1").arg(videoId));
-            } else {
-                const QString cv = details.value(QStringLiteral("concurrentViewers")).toString();
+            const QString cv = details.value(QStringLiteral("concurrentViewers")).toString();
+            if (!cv.isEmpty()) {
                 bool ok = false;
                 const int parsed = cv.toInt(&ok);
-                if (ok) {
-                    viewers = parsed;
-                    logLine(QStringLiteral("[VIEWERS-YT] count=%1").arg(viewers));
-                } else {
-                    logLine(QStringLiteral("[VIEWERS-YT] failed to parse concurrentViewers=%1").arg(cv));
-                }
+                if (ok) viewers = parsed;
             }
         }
         updateViewerCount(PlatformId::YouTube, viewers);
