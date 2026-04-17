@@ -425,7 +425,6 @@ void YouTubeLiveDiscovery::requestActiveBroadcast()
     QUrl url(YouTube::Api::liveBroadcasts());
     QUrlQuery query(url);
     query.addQueryItem(QStringLiteral("part"), QStringLiteral("id,snippet,status"));
-    query.addQueryItem(QStringLiteral("mine"), QStringLiteral("true"));
     query.addQueryItem(QStringLiteral("broadcastStatus"), QStringLiteral("active"));
     query.addQueryItem(QStringLiteral("broadcastType"), QStringLiteral("all"));
     query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("50"));
