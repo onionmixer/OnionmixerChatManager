@@ -169,6 +169,9 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
 
     m_snapshot = m_settings.load();
     m_detailLogEnabled = m_snapshot.detailLogEnabled;
+    // ini 로드 이후 delegate에 스타일 재주입 (setupUi()의 configureChatTableForCurrentView 호출이
+    // snapshot 로드 전이라 기본값으로 렌더되는 문제 회피)
+    configureChatTableForCurrentView();
     m_youtubeAuthorLookupTimer = new QTimer(this);
     m_youtubeAuthorLookupTimer->setSingleShot(true);
     connect(m_youtubeAuthorLookupTimer, &QTimer::timeout,
