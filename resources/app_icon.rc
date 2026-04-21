@@ -1,0 +1,3 @@
+// Windows executable icon embedding for OnionmixerChatManagerQt5.
+// MinGW windres or MSVC rc attaches the ICON resource to the exe metadata.
+IDI_ICON1 ICON DISCARDABLE "icons/app_icon.ico"

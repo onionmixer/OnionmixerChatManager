@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Onionmixer Chat Manager
+Comment=Manage YouTube and CHZZK live chat
+Exec=OnionmixerChatManagerQt5
+Icon=onionmixer-chat-manager
+Terminal=false
+Categories=Network;Chat;Qt;

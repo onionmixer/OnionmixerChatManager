@@ -210,8 +210,15 @@ add_executable(OnionmixerChatManagerQt5
     src/platform/chzzk/ChzzkAdapter.h
     src/platform/chzzk/ChzzkEmojiResolver.cpp
     src/platform/chzzk/ChzzkEmojiResolver.h
+    resources/onionmixer-chat-manager.qrc
     ${ONIONMIXERCHATMANAGER_YT_STREAMLIST_GENERATED_SRCS}
 )
+
+# Windows — embed the application icon into the executable metadata.
+if (WIN32)
+    target_sources(OnionmixerChatManagerQt5 PRIVATE
+        resources/app_icon.rc)
+endif()
 
 target_include_directories(OnionmixerChatManagerQt5 PRIVATE
     src
@@ -325,6 +332,27 @@ install(FILES
     DESTINATION share/doc/OnionmixerChatManagerQt5
     COMPONENT server
 )
+if (UNIX AND NOT APPLE)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/resources/onionmixer-chat-manager.desktop
+        DESTINATION share/applications
+        COMPONENT server
+    )
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app_icon_256.png
+        DESTINATION share/icons/hicolor/256x256/apps
+        RENAME onionmixer-chat-manager.png
+        COMPONENT server
+    )
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app_icon_128.png
+        DESTINATION share/icons/hicolor/128x128/apps
+        RENAME onionmixer-chat-manager.png
+        COMPONENT server
+    )
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app_icon_48.png
+        DESTINATION share/icons/hicolor/48x48/apps
+        RENAME onionmixer-chat-manager.png
+        COMPONENT server
+    )
+endif()
 
 # 클라 바이너리·번역 → client 컴포넌트
 # v65: 클라는 자체 번역 파일(onionmixerbroadchatclient_*.qm)만 설치.

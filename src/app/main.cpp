@@ -6,6 +6,8 @@
 #include "shared/BroadChatVersion.h"
 
 #include <QApplication>
+#include <QIcon>
+#include <QSize>
 #include <QtGlobal>
 
 #include <cstdio>
@@ -34,6 +36,15 @@ int main(int argc, char* argv[])
     }
 
     QApplication app(argc, argv);
+
+    QIcon appIcon;
+    for (const int sz : {16, 24, 32, 48, 64, 128, 256}) {
+        appIcon.addFile(QStringLiteral(":/icons/app_%1.png").arg(sz),
+                        QSize(sz, sz));
+    }
+    if (!appIcon.isNull()) {
+        app.setWindowIcon(appIcon);
+    }
 
     // PLAN §18.3 v15-14: category 기반 로그 prefix 통일.
     // "[broadchat] ...", "[broadchat.warn] ..." 같이 대괄호 포맷 자동 출력.
