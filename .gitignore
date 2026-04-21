@@ -31,3 +31,8 @@ CODEX.md
 
 # External reference sources (submodule-incompatible repos)
 /etc/
+
+# Runtime config files — contain OAuth tokens, auth_token (BroadChat), etc.
+# Never commit secrets. PLAN_MAINPROJECT_MIGRATION.md §21-γ-8·v22-8.
+/config/app.ini
+/config/tokens.ini

@@ -1,0 +1,10 @@
+; OnionmixerChatManagerQt5 — tokens.ini 예시
+; OAuth 액세스·리프레시 토큰이 런타임에 여기 저장됩니다.
+; 앱이 자동 생성/업데이트하므로 수동 편집은 권장하지 않습니다.
+; .gitignore로 제외 대상.
+
+; 예시 (실제 값은 앱이 OAuth flow 완료 후 자동 기록):
+; [youtube]
+; access_token=...
+; refresh_token=...
+; expires_at=2026-04-18T12:34:56Z

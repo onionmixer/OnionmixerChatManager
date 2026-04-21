@@ -334,7 +334,79 @@ Qt `LinguistTools`가 있으면 `.qm` 빌드가 활성화됩니다.
 - `{cwd}/translations`
 - `./translations`
 
-## 11. 개발자 참고
+## 11. 패키징 (Debian .deb)
+
+CMake + CPack으로 **두 개의 독립 .deb 패키지**를 생성합니다.
+
+### 11.1 패키지 구성
+
+| 패키지 | 포함 바이너리 | 의존 관계 | 용도 |
+|--------|----------------|-----------|------|
+| `onionmixerchatmanagerqt5` | 메인 앱 + 설정 템플릿 + 번역 | **`Depends: onionmixerbroadchatclient`** | 방송 PC (서버) |
+| `onionmixerbroadchatclient` | 클라이언트 앱 + 번역 | 독립 (Qt5 런타임만 의존) | 렌더링 전용 PC |
+
+### 11.2 포함·비포함 규칙 (핵심)
+
+- **`onionmixerchatmanagerqt5` 설치 시** `onionmixerbroadchatclient`도 자동 설치됨 (apt/dpkg 의존성). 방송 PC에서 서버를 돌리면서 같은 PC에 클라 오버레이도 띄우는 일반 운영 시나리오 커버.
+- **`onionmixerbroadchatclient` 단독 설치는 허용**. 메인 앱은 포함되지 않음. 다른 PC에서 접속 전용으로만 사용하는 경우.
+- 즉 포함 관계는 **한 방향 (서버 → 클라)만 성립**. 클라 패키지가 서버를 끌어오지 않음.
+- 기술적 구현: 서버 .deb의 Control 필드 `Depends:` 에 클라 패키지 명시 (`Depends: onionmixerbroadchatclient (>= <version>)`). 클라 .deb의 Depends에는 서버 없음.
+
+### 11.3 빌드·패키지 생성
+
+**권장 (스크립트)**:
+
+```bash
+./scripts/package-deb.sh              # 증분 빌드
+./scripts/package-deb.sh --clean      # build 디렉토리 삭제 후 처음부터
+./scripts/package-deb.sh --verbose    # 상세 출력
+./scripts/package-deb.sh --help
+```
+
+**수동 (스크립트와 동등)**:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+cd build && cpack -G DEB
+```
+
+결과물 (`build/`):
+
+```
+onionmixerchatmanagerqt5_0.1.0_amd64.deb
+onionmixerbroadchatclient_0.1.0_amd64.deb
+```
+
+### 11.4 설치·제거
+
+```bash
+# 서버 PC (두 패키지 모두 설치됨)
+sudo apt install ./onionmixerchatmanagerqt5_0.1.0_amd64.deb
+
+# 클라이언트 PC (클라만)
+sudo apt install ./onionmixerbroadchatclient_0.1.0_amd64.deb
+
+# 제거
+sudo apt remove onionmixerchatmanagerqt5       # 클라는 그대로 유지
+sudo apt autoremove onionmixerbroadchatclient  # 의존성 없으면 함께 제거
+```
+
+### 11.5 설치 후 경로
+
+- 실행파일: `/usr/bin/OnionmixerChatManagerQt5`, `/usr/bin/OnionmixerBroadChatClient`
+- 번역 `.qm`: `/usr/share/OnionmixerChatManagerQt5/translations/` (서버), `/usr/share/OnionmixerBroadChatClient/translations/` (클라)
+- 설정 템플릿: `/usr/share/OnionmixerChatManagerQt5/config.example/`
+- 사용자 설정은 `~/.config/OnionmixerChatManager/` 또는 실행 시 `--config-dir` CLI
+
+### 11.6 운영 문서
+
+- [CHANGELOG](docs/CHANGELOG.md) — 릴리즈 히스토리
+- [운영자 체크리스트](docs/operator-checklist.md) — 설치·설정·점검·보안·제거 순서
+- [트러블슈팅](docs/troubleshooting.md) — listen 실패·auth_failed·emoji 404 등 증상별 대응
+- [VPN 가이드](docs/vpn-guide.md) — WireGuard·Tailscale 예시 (TLS 비도입 대체)
+
+## 12. 개발자 참고
 
 핵심 기준:
 - YouTube / CHZZK adapter는 통합하지 않음
