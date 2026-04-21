@@ -67,6 +67,9 @@ UnifiedChatMessage parseChatData(const QJsonObject& d)
         if (!m.timestamp.isValid()) {
             m.timestamp = QDateTime::fromString(ts, Qt::ISODate);
         }
+        if (m.timestamp.isValid()) {
+            m.timestamp = m.timestamp.toLocalTime();
+        }
     }
     return m;
 }

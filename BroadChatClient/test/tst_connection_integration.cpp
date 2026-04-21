@@ -31,6 +31,8 @@ private slots:
     void version_mismatch_when_server_proto_max_zero();
     // 시나리오 8: malformed envelope → protocol_error
     void malformed_envelope_triggers_protocol_error();
+    // 시나리오 9: UTC chat timestamp → local time for display parity with main app
+    void chat_timestamp_from_utc_is_normalized_to_local_time();
 };
 
 namespace {
@@ -178,6 +180,39 @@ void ConnectionIntegration::malformed_envelope_triggers_protocol_error()
     f.server.sendRawBytes(QByteArrayLiteral("{this is broken json\n"));
     QVERIFY(errSpy.wait(2000));
     QCOMPARE(errSpy.count(), 1);
+}
+
+void ConnectionIntegration::chat_timestamp_from_utc_is_normalized_to_local_time()
+{
+    TestFixture f;
+    QVERIFY(f.setupAndConnect());
+
+    QSignalSpy completeSpy(&f.conn, &BroadChatConnection::helloCompleted);
+    f.server.sendServerHello();
+    QVERIFY(completeSpy.wait(2000));
+
+    QSignalSpy chatSpy(&f.conn, &BroadChatConnection::chatReceived);
+
+    const QString wireTimestamp = QStringLiteral("2026-04-11T06:30:00.000Z");
+    QJsonObject data;
+    data.insert(QStringLiteral("platform"), QStringLiteral("youtube"));
+    data.insert(QStringLiteral("messageId"), QStringLiteral("utc-ts-1"));
+    data.insert(QStringLiteral("authorName"), QStringLiteral("Tester"));
+    data.insert(QStringLiteral("text"), QStringLiteral("timestamp check"));
+    data.insert(QStringLiteral("timestamp"), wireTimestamp);
+
+    f.server.sendEnvelope(QStringLiteral("chat"), data);
+    QVERIFY(chatSpy.wait(2000));
+    QCOMPARE(chatSpy.count(), 1);
+
+    const auto message = qvariant_cast<UnifiedChatMessage>(chatSpy.first().at(0));
+    QVERIFY(message.timestamp.isValid());
+
+    const QDateTime expected =
+        QDateTime::fromString(wireTimestamp, Qt::ISODateWithMs).toLocalTime();
+    QCOMPARE(message.timestamp, expected);
+    QCOMPARE(message.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")),
+             expected.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
 }
 
 QTEST_GUILESS_MAIN(ConnectionIntegration)
