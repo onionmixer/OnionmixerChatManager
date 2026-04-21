@@ -31,6 +31,9 @@ class ChatDisplayController;
 class ChatMessageModel;
 class ChatterStatsManager;
 class EmojiImageCache;
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+class BroadChatServer;
+#endif
 class QListView;
 class QSplitter;
 class QStackedWidget;
@@ -88,22 +91,17 @@ private:
     void connectConfigurationDialogSignals();
     void refreshConnectButton();
     void refreshChatViewToggleButton();
-    void configureChatTableForCurrentView();
     void setPlatformStatus(PlatformId platform, const QString& statusText);
     void setPlatformRuntimePhase(PlatformId platform, const QString& phase);
     void setPlatformRuntimeError(PlatformId platform, const QString& code, const QString& message);
     void clearPlatformRuntimeError(PlatformId platform);
     void reconcileApiStatus();
     QString connectionStateText(ConnectionState state) const;
-    void appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel = QString());
-    void appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel = QString());
-    void rebuildChatTable();
     QString messengerAuthorLabel(const UnifiedChatMessage& message) const;
     QString displayAuthorLabel(const UnifiedChatMessage& message) const;
     QString normalizeYouTubeHandle(const QString& value) const;
     void maybeQueueYouTubeAuthorHandleLookup(const UnifiedChatMessage& message);
     void flushYouTubeAuthorHandleLookupQueue();
-    QWidget* buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const;
     void refreshChatterListDialog();
     void updateActionPanel();
     void updateComposerUiState();
@@ -176,6 +174,11 @@ private:
     bool m_awaitingYouTubeViewerCount = false;
     int m_youtubeViewerCount = -1;
     int m_chzzkViewerCount = -1;
+    // YouTube viewer flicker 완화 (Constants.h Viewers 참조)
+    int m_youtubeViewerMissStreak = 0;          // 연속 결측 횟수 (≥grace 일 때 리셋)
+    QDateTime m_youtubeViewerLastFreshAt;       // 마지막 유효값 수신 시각 (tooltip용)
+    qint64 m_youtubeViewerMissTotal = 0;        // 누적 결측 tick
+    qint64 m_youtubeViewerTotalTicks = 0;       // 누적 polling tick (결측·성공 합)
     QTimer* m_apiStatusReconcileTimer = nullptr;
     QDateTime m_nextPeriodicChzzkProbeAtUtc;
     bool m_awaitingChzzkLiveProbe = false;
@@ -194,11 +197,12 @@ private:
     ChatMessageModel* m_chatModel = nullptr;
     ChatBubbleDelegate* m_chatDelegate = nullptr;
     ChatDisplayController* m_chatController = nullptr;
-
-    enum class ChatViewMode {
-        Messenger,
-        Table,
-    };
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    BroadChatServer* m_broadChatServer = nullptr;
+    // §20 UI 상태 표시 — 상태바 영구 라벨
+    QLabel* m_broadChatStatusLabel = nullptr;
+    QLabel* m_broadChatClientCountLabel = nullptr;
+#endif
 
     QPushButton* m_btnConnectToggle = nullptr;
     QPushButton* m_btnToggleChatView = nullptr;
@@ -239,7 +243,6 @@ private:
     QPushButton* m_btnComposerSend = nullptr;
     QTextEdit* m_txtEventLog = nullptr;
 
-    QVector<UnifiedChatMessage> m_chatMessages;
     ChatterStatsManager* m_chatterStatsManager = nullptr;
     QHash<PlatformId, QString> m_platformStatusCodes;
     QHash<QString, QString> m_youtubeAuthorHandleCache;
@@ -250,9 +253,7 @@ private:
     int m_sendHistoryIndex = 0;
     QString m_sendHistoryDraft;
     bool m_composerApplyingHistory = false;
-    ChatViewMode m_chatViewMode = ChatViewMode::Messenger;
     bool m_detailLogEnabled = false;
-    QSet<QString> m_recentMessageIds;
 };
 
 #endif // MAIN_WINDOW_H

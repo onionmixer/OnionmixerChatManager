@@ -134,6 +134,26 @@ void ChatDisplayController::toggleViewMode()
     rebuildChatTable();
 }
 
+bool ChatDisplayController::applyAuthorHandleUpdate(
+    const QHash<QString, QString>& channelIdToHandle)
+{
+    if (channelIdToHandle.isEmpty() || m_chatMessages.isEmpty()) return false;
+
+    bool updated = false;
+    for (UnifiedChatMessage& message : m_chatMessages) {
+        if (message.platform != PlatformId::YouTube) continue;
+        const QString authorId = message.authorId.trimmed();
+        if (authorId.isEmpty()) continue;
+        const QString handle = channelIdToHandle.value(authorId);
+        if (!handle.isEmpty() && message.rawAuthorDisplayName != handle) {
+            message.rawAuthorDisplayName = handle;
+            updated = true;
+        }
+    }
+    if (updated) rebuildChatTable();
+    return updated;
+}
+
 void ChatDisplayController::appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel)
 {
     if (m_chatViewMode != ChatViewMode::Table || !m_tblChat) return;

@@ -3,8 +3,10 @@
 
 #include "core/AppTypes.h"
 
+#include <QHash>
 #include <QObject>
 #include <QSet>
+#include <QString>
 #include <QVector>
 
 class ChatBubbleDelegate;
@@ -37,6 +39,10 @@ public:
     enum class ChatViewMode { Messenger, Table };
     ChatViewMode viewMode() const { return m_chatViewMode; }
     const QVector<UnifiedChatMessage>& messages() const { return m_chatMessages; }
+
+    // YouTube authorId → resolved @handle 맵을 받아 메시지의 rawAuthorDisplayName을
+    // 일괄 갱신하고 현재 뷰를 재렌더한다. 변경된 메시지가 있으면 true 반환.
+    bool applyAuthorHandleUpdate(const QHash<QString, QString>& channelIdToHandle);
 
 signals:
     void selectionChanged();

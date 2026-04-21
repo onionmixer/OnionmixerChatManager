@@ -15,6 +15,11 @@
 #include "ui/ChatMessageModel.h"
 #include "ui/ChatterStatsManager.h"
 #include "ui/ConfigurationDialog.h"
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+#  include "core/BroadChatServer.h"
+#  include "shared/BroadChatEndpoint.h"
+#  include <QHostAddress>
+#endif
 
 #include <algorithm>
 #include <QAction>
@@ -160,7 +165,87 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     m_chatterStatsManager = new ChatterStatsManager(this);
     m_chatDelegate = new ChatBubbleDelegate(this);
     m_chatDelegate->setEmojiCache(m_emojiCache);
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // PLAN §4.1·§19.3 v14-19: hook 블록 전체를 컴파일 옵션으로 감싸기.
+    m_broadChatServer = new BroadChatServer(m_chatModel, m_emojiCache, this);
+    connect(&m_connectionCoordinator, &ConnectionCoordinator::stateChanged,
+            this, [this](ConnectionState state) {
+        if (!m_broadChatServer) return;
+        switch (state) {
+        case ConnectionState::CONNECTED:
+        case ConnectionState::PARTIALLY_CONNECTED: {
+            // v19-16·v22-10: snapshot TCP 설정 → start 전달.
+            const QHostAddress bind(
+                BroadChatEndpoint::normalizeBindAddress(m_snapshot.broadchatTcpBind));
+            const quint16 port =
+                BroadChatEndpoint::normalizePort(m_snapshot.broadchatTcpPort);
+            const QString token = m_snapshot.broadchatAuthToken;
+            // v22-14: enabled=false ini 설정 시 skip
+            if (m_snapshot.broadchatEnabled) {
+                m_broadChatServer->start(bind, port, token);
+            }
+            break;
+        }
+        case ConnectionState::DISCONNECTING:
+        case ConnectionState::IDLE:
+        case ConnectionState::ERROR:
+            m_broadChatServer->stop();
+            break;
+        case ConnectionState::CONNECTING:
+            // §19.3 v11-10: CONNECTING은 start/stop 어느 쪽도 호출 안 함.
+            break;
+        }
+    });
+    // v13-16: hook connect 완료 표시
+    m_broadChatServer->markLifecycleHookInstalled();
+#endif
     setupUi();
+
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // §20 UI 상태 표시 — 상태바 영구 라벨 + BroadChatServer 시그널 구독.
+    m_broadChatStatusLabel = new QLabel(tr("BroadChat: off"), this);
+    m_broadChatStatusLabel->setObjectName(QStringLiteral("lblBroadChatStatus"));
+    m_broadChatClientCountLabel = new QLabel(tr("clients: 0"), this);
+    m_broadChatClientCountLabel->setObjectName(QStringLiteral("lblBroadChatClients"));
+    m_broadChatClientCountLabel->setStyleSheet(QStringLiteral("color: #888888;"));
+    statusBar()->addPermanentWidget(m_broadChatStatusLabel);
+    statusBar()->addPermanentWidget(m_broadChatClientCountLabel);
+
+    connect(m_broadChatServer, &BroadChatServer::listeningChanged,
+            this, [this](bool listening, quint16 port) {
+        if (!m_broadChatStatusLabel) return;
+        if (listening) {
+            m_broadChatStatusLabel->setText(
+                tr("BroadChat: listening :%1").arg(port));
+            m_broadChatStatusLabel->setStyleSheet(QString());
+            m_broadChatStatusLabel->setToolTip(QString());
+        } else {
+            m_broadChatStatusLabel->setText(tr("BroadChat: off"));
+            m_broadChatStatusLabel->setStyleSheet(QString());
+        }
+    });
+    connect(m_broadChatServer, &BroadChatServer::clientCountChanged,
+            this, [this](int n) {
+        if (!m_broadChatClientCountLabel) return;
+        m_broadChatClientCountLabel->setText(tr("clients: %1").arg(n));
+        m_broadChatClientCountLabel->setStyleSheet(
+            n > 0 ? QStringLiteral("color: #4AFF7F;")
+                  : QStringLiteral("color: #888888;"));
+    });
+    // v11-3·v24 D2 listenFailed → 상태 라벨 error 모드 latch + modal 안내
+    connect(m_broadChatServer, &BroadChatServer::listenFailed,
+            this, [this](const QString& detail) {
+        if (m_broadChatStatusLabel) {
+            m_broadChatStatusLabel->setText(tr("BroadChat: error"));
+            m_broadChatStatusLabel->setToolTip(detail);
+            m_broadChatStatusLabel->setStyleSheet(QStringLiteral("color: #FF6060;"));
+        }
+        QMessageBox::warning(this, tr("BroadChat Listen Failed"),
+            tr("BroadChat 서버 listen에 실패했습니다.\n\n%1\n\n"
+               "설정 창에서 port 또는 bind 주소를 변경한 후 재시작해주세요.")
+                .arg(detail));
+    });
+#endif
     // 비동기 이모지 로드 완료 시 messenger 뷰·방송창·Config preview 재페인트로
     // broken-image → 실제 이미지 전환 (C+ 강화: preview 2개도 update 대상에 포함)
     connect(m_emojiCache, &EmojiImageCache::imageReady, this, [this](const QString&) {
@@ -178,7 +263,7 @@ MainWindow::MainWindow(const QString& configDir, QWidget* parent)
     m_detailLogEnabled = m_snapshot.detailLogEnabled;
     // ini 로드 이후 delegate에 스타일 재주입 (setupUi()의 configureChatTableForCurrentView 호출이
     // snapshot 로드 전이라 기본값으로 렌더되는 문제 회피)
-    configureChatTableForCurrentView();
+    m_chatController->configureChatTableForCurrentView();
     m_youtubeAuthorLookupTimer = new QTimer(this);
     m_youtubeAuthorLookupTimer->setSingleShot(true);
     connect(m_youtubeAuthorLookupTimer, &QTimer::timeout,
@@ -272,6 +357,12 @@ void MainWindow::changeEvent(QEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // PLAN §7.1 v15-4: stop()을 기존 close 로직보다 먼저 호출해 bye 송신 시간 확보.
+    if (m_broadChatServer) {
+        m_broadChatServer->stop();
+    }
+#endif
     if (m_broadcastWindow) {
         m_broadcastWindow->close();
         delete m_broadcastWindow;
@@ -312,15 +403,12 @@ void MainWindow::onConnectToggleClicked()
 
 void MainWindow::onToggleChatViewClicked()
 {
-    m_chatViewMode = (m_chatViewMode == ChatViewMode::Messenger)
-        ? ChatViewMode::Table
-        : ChatViewMode::Messenger;
+    m_chatController->toggleViewMode();
     refreshChatViewToggleButton();
-    rebuildChatTable();
+    const bool messenger = m_chatController->viewMode()
+                           == ChatDisplayController::ChatViewMode::Messenger;
     statusBar()->showMessage(
-        m_chatViewMode == ChatViewMode::Messenger
-            ? tr("Chat view: Messenger")
-            : tr("Chat view: Table"),
+        messenger ? tr("Chat view: Messenger") : tr("Chat view: Table"),
         2000);
 }
 
@@ -366,7 +454,7 @@ void MainWindow::onConfigApplyRequested(const AppSettingsSnapshot& snapshot)
     m_snapshot = snapshot;
     m_detailLogEnabled = snapshot.detailLogEnabled;
     if (chatFontChanged) {
-        rebuildChatTable();
+        m_chatController->rebuildChatTable();
     }
     m_txtEventLog->append(QStringLiteral("[CONFIG] Applied and saved."));
     if (languageChanged) {
@@ -674,14 +762,14 @@ void MainWindow::setupChatTable(QWidget* root)
     m_tblChat->setSelectionMode(QAbstractItemView::SingleSelection);
     connect(m_tblChat, &QTableWidget::itemSelectionChanged, this, &MainWindow::onChatSelectionChanged);
 
-    m_chatStack->addWidget(m_chatListView);  // index 0 = Messenger
+    m_chatStack->addWidget(m_chatListView);  // index 0 = Messenger (default)
     m_chatStack->addWidget(m_tblChat);       // index 1 = Table
 
     // Copy shortcut on stack (applies to both)
     auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_chatStack);
     connect(copyShortcut, &QShortcut::activated, this, &MainWindow::onCopySelectedChat);
-
-    configureChatTableForCurrentView();
+    // 초기 뷰 설정은 MainWindow 생성자가 m_chatController 구성 후
+    // configureChatTableForCurrentView() 를 호출해 일괄 처리한다.
 }
 
 void MainWindow::setupActionPanel(QWidget* root)
@@ -944,7 +1032,12 @@ void MainWindow::retranslateUi()
     }
     refreshConnectButton();
     refreshChatViewToggleButton();
-    configureChatTableForCurrentView();
+    // setupUi()가 retranslateUi()를 선행 호출할 때는 m_chatController 가 아직
+    // 생성되지 않았음 (생성자 라인 257에서 setupUi 복귀 후 생성). 초기 헤더 설정은
+    // 생성자의 후속 호출이 담당하므로 null일 때 skip.
+    if (m_chatController) {
+        m_chatController->configureChatTableForCurrentView();
+    }
     m_lblConnectionState->setText(connectionStateText(m_connectionCoordinator.state()));
     setPlatformStatus(PlatformId::YouTube, m_platformStatusCodes.value(PlatformId::YouTube, QStringLiteral("IDLE")));
     setPlatformStatus(PlatformId::Chzzk, m_platformStatusCodes.value(PlatformId::Chzzk, QStringLiteral("IDLE")));
@@ -1071,43 +1164,9 @@ void MainWindow::refreshChatViewToggleButton()
     if (!m_btnToggleChatView) {
         return;
     }
-    m_btnToggleChatView->setText(
-        m_chatViewMode == ChatViewMode::Messenger
-            ? tr("View: Messenger")
-            : tr("View: Table"));
-}
-
-void MainWindow::configureChatTableForCurrentView()
-{
-    if (!m_chatStack) {
-        return;
-    }
-
-    if (m_chatViewMode == ChatViewMode::Messenger) {
-        m_chatStack->setCurrentWidget(m_chatListView);
-        if (m_chatDelegate) {
-            m_chatDelegate->setFontFamily(m_snapshot.chatFontFamily);
-            m_chatDelegate->setFontSize(m_snapshot.chatFontSize);
-            m_chatDelegate->setFontBold(m_snapshot.chatFontBold);
-            m_chatDelegate->setFontItalic(m_snapshot.chatFontItalic);
-            m_chatDelegate->setLineSpacing(m_snapshot.chatLineSpacing);
-        }
-        return;
-    }
-
-    m_chatStack->setCurrentWidget(m_tblChat);
-
-    m_tblChat->setColumnCount(4);
-    m_tblChat->setHorizontalHeaderLabels({ tr("Time"), tr("Platform"), tr("Author"), tr("Message") });
-    m_tblChat->horizontalHeader()->setVisible(true);
-    m_tblChat->horizontalHeader()->setStretchLastSection(true);
-    m_tblChat->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_tblChat->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_tblChat->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_tblChat->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    m_tblChat->setShowGrid(true);
-    m_tblChat->setFrameShape(QFrame::StyledPanel);
-    m_tblChat->setStyleSheet(QString());
+    const bool messenger = m_chatController
+        && m_chatController->viewMode() == ChatDisplayController::ChatViewMode::Messenger;
+    m_btnToggleChatView->setText(messenger ? tr("View: Messenger") : tr("View: Table"));
 }
 
 void MainWindow::setPlatformStatus(PlatformId platform, const QString& statusText)
@@ -1269,6 +1328,14 @@ void MainWindow::onChatReceived(const UnifiedChatMessage& message)
 
     m_chatterStatsManager->recordChatter(message, authorLabel);
     m_chatController->appendMessage(message, authorLabel);
+
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // PLAN §4.3: ChatDisplayController::appendMessage 호출 이후 broadcastChat.
+    // 이중 가드로 인해 클라 미접속·서버 미실행 시 무부하.
+    if (m_broadChatServer) {
+        m_broadChatServer->broadcastChat(message);
+    }
+#endif
     m_txtEventLog->append(QStringLiteral("[CHAT] %1 author=%2 text=%3")
                               .arg(platformKey(message.platform),
                                   authorLabel,
@@ -1285,180 +1352,12 @@ void MainWindow::onChatReceived(const UnifiedChatMessage& message)
     }
 }
 
-void MainWindow::appendChatMessage(const UnifiedChatMessage& message, const QString& authorLabel)
-{
-    const QString msgId = message.messageId.trimmed();
-    if (!msgId.isEmpty()) {
-        if (m_recentMessageIds.contains(msgId)) {
-            return;
-        }
-        m_recentMessageIds.insert(msgId);
-        if (m_recentMessageIds.size() > OnionmixerChatManager::Limits::kRecentMessageIdsMax) {
-            m_recentMessageIds.clear();
-            m_recentMessageIds.insert(msgId);
-        }
-    }
-
-    m_chatMessages.push_back(message);
-    m_chatModel->appendMessage(message);
-
-    const int maxMessages = m_snapshot.chatMaxMessages;
-    if (maxMessages > 0 && m_chatMessages.size() > maxMessages) {
-        const int keepCount = maxMessages * 4 / 5;
-        m_chatMessages = m_chatMessages.mid(m_chatMessages.size() - keepCount);
-        m_chatModel->trimOldest(keepCount);
-        if (m_chatViewMode == ChatViewMode::Table) {
-            rebuildChatTable();
-        }
-    }
-
-    if (m_chatViewMode == ChatViewMode::Table) {
-        const int row = m_tblChat->rowCount();
-        m_tblChat->insertRow(row);
-        appendChatRow(row, message, authorLabel);
-        m_tblChat->scrollToBottom();
-    } else {
-        m_chatListView->scrollToBottom();
-    }
-    updateActionPanel();
-}
-
-
 void MainWindow::refreshChatterListDialog()
 {
     if (!m_chatterListDialog) {
         return;
     }
     m_chatterListDialog->setEntries(m_chatterStatsManager->sortedEntries());
-}
-
-void MainWindow::appendChatRow(int row, const UnifiedChatMessage& message, const QString& authorLabel)
-{
-    const QString platform = message.platform == PlatformId::YouTube ? tr("YouTube") : tr("CHZZK");
-    const QString timeText = message.timestamp.isValid()
-        ? message.timestamp.toString(QStringLiteral("HH:mm:ss"))
-        : QStringLiteral("-");
-    const QString authorDisplay = authorLabel.isEmpty() ? messengerAuthorLabel(message) : authorLabel;
-
-    if (m_chatViewMode == ChatViewMode::Messenger) {
-        const QString copyText = QStringLiteral("%1\n%2").arg(authorDisplay, message.text);
-        auto* item = new QTableWidgetItem(QString());
-        item->setData(Qt::UserRole, copyText);
-        item->setToolTip(QStringLiteral("%1 | %2 | %3")
-                             .arg(timeText, platform, authorDisplay));
-        m_tblChat->setItem(row, 0, item);
-        QWidget* widget = buildMessengerCellWidget(message, authorDisplay);
-        m_tblChat->setCellWidget(row, 0, widget);
-        const int minRowHeight = qBound(8, m_snapshot.chatFontSize, 24) * 3 + qBound(0, m_snapshot.chatLineSpacing, 20) * 2;
-        m_tblChat->setRowHeight(row, qMax(minRowHeight, widget->sizeHint().height()));
-        return;
-    }
-
-    m_tblChat->setItem(row, 0, new QTableWidgetItem(timeText));
-    m_tblChat->setItem(row, 1, new QTableWidgetItem(platform));
-    m_tblChat->setItem(row, 2, new QTableWidgetItem(authorDisplay));
-    m_tblChat->setItem(row, 3, new QTableWidgetItem(message.text));
-}
-
-QWidget* MainWindow::buildMessengerCellWidget(const UnifiedChatMessage& message, const QString& authorDisplay) const
-{
-    const int fontSize = qBound(8, m_snapshot.chatFontSize, 24);
-    const int lineSpacing = qBound(0, m_snapshot.chatLineSpacing, 20);
-    const bool isBold = m_snapshot.chatFontBold;
-    const bool isItalic = m_snapshot.chatFontItalic;
-    const int badgeSize = fontSize + 2;
-    const int badgeFontSize = qMax(fontSize - 4, 6);
-    const int timestampFontSize = qMax(fontSize - 2, 7);
-    const QString fontFamily = m_snapshot.chatFontFamily.trimmed();
-    QString fontExtraStyle;
-    if (!fontFamily.isEmpty()) {
-        fontExtraStyle += QStringLiteral("font-family:'%1';").arg(fontFamily);
-    }
-    if (isBold) {
-        fontExtraStyle += QStringLiteral("font-weight:bold;");
-    }
-    if (isItalic) {
-        fontExtraStyle += QStringLiteral("font-style:italic;");
-    }
-
-    // Emoji replacement
-    QString messageHtml = message.richText.isEmpty()
-        ? message.text.toHtmlEscaped()
-        : message.richText;
-    for (const ChatEmojiInfo& emo : message.emojis) {
-        const QString placeholder = QStringLiteral("emoji://%1").arg(emo.emojiId);
-        if (m_emojiCache && m_emojiCache->contains(emo.emojiId)) {
-            const QPixmap pix = m_emojiCache->get(emo.emojiId);
-            QByteArray ba;
-            QBuffer buf(&ba);
-            buf.open(QIODevice::WriteOnly);
-            pix.save(&buf, "PNG");
-            messageHtml.replace(placeholder,
-                QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(ba.toBase64())));
-        } else {
-            if (m_emojiCache) {
-                m_emojiCache->ensureLoaded(emo.emojiId, emo.imageUrl);
-            }
-            messageHtml.replace(
-                QStringLiteral("<img src='%1' width='24' height='24' alt='%2'/>")
-                    .arg(placeholder, emo.fallbackText.toHtmlEscaped()),
-                emo.fallbackText.toHtmlEscaped());
-        }
-    }
-
-    const PlatformId plat = message.platform;
-    ChatBubbleParams params;
-    params.badgeText = PlatformTraits::badgeSymbol(plat);
-    params.badgeStyle = QStringLiteral("background:%1; color:%2; border-radius:%3px; font-weight:700; font-size:%4px;")
-                            .arg(PlatformTraits::badgeBgColor(plat), PlatformTraits::badgeFgColor(plat))
-                            .arg(badgeSize / 2).arg(badgeFontSize);
-    params.authorText = authorDisplay.toHtmlEscaped();
-    params.authorStyle = QStringLiteral("color:%1; font-weight:700; font-size:%2px;%3")
-                             .arg(PlatformTraits::authorColor(plat)).arg(fontSize).arg(fontExtraStyle);
-    params.messageHtml = messageHtml;
-    params.messageStyle = QStringLiteral("color:#111111; font-size:%1px; font-weight:600;%2")
-                              .arg(fontSize).arg(fontExtraStyle);
-    params.timestampText = message.timestamp.isValid()
-        ? message.timestamp.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
-        : QString();
-    params.timestampStyle = QStringLiteral("color:#999999; font-size:%1px;%2")
-                                .arg(timestampFontSize).arg(fontExtraStyle);
-    params.lineSpacing = lineSpacing;
-    params.badgeSize = badgeSize;
-
-    return buildChatBubble(params, m_tblChat);
-}
-
-void MainWindow::rebuildChatTable()
-{
-    configureChatTableForCurrentView();
-
-    if (m_chatViewMode == ChatViewMode::Messenger) {
-        // Model already holds data — notify view that row heights may have changed
-        if (m_chatModel) {
-            emit m_chatModel->layoutChanged();
-        }
-        if (m_chatListView) {
-            m_chatListView->viewport()->update();
-        }
-        updateActionPanel();
-        return;
-    }
-
-    if (!m_tblChat) {
-        return;
-    }
-    const int previousRow = selectedChatRow();
-    QSignalBlocker blocker(m_tblChat);
-    m_tblChat->setRowCount(0);
-    for (int i = 0; i < m_chatMessages.size(); ++i) {
-        m_tblChat->insertRow(i);
-        appendChatRow(i, m_chatMessages.at(i));
-    }
-    if (previousRow >= 0 && previousRow < m_tblChat->rowCount()) {
-        m_tblChat->selectRow(previousRow);
-    }
-    updateActionPanel();
 }
 
 QString MainWindow::messengerAuthorLabel(const UnifiedChatMessage& message) const
@@ -1613,21 +1512,11 @@ void MainWindow::flushYouTubeAuthorHandleLookupQueue()
                 }
             }
 
-            bool updated = false;
-            for (UnifiedChatMessage& message : m_chatMessages) {
-                if (message.platform != PlatformId::YouTube) {
-                    continue;
-                }
-                const QString cachedHandle = m_youtubeAuthorHandleCache.value(message.authorId.trimmed());
-                if (!cachedHandle.isEmpty() && message.rawAuthorDisplayName != cachedHandle) {
-                    message.rawAuthorDisplayName = cachedHandle;
-                    updated = true;
-                }
-            }
+            const bool updated =
+                m_chatController->applyAuthorHandleUpdate(m_youtubeAuthorHandleCache);
             if (updated) {
-                m_chatterStatsManager->rebuildFromMessages(m_chatMessages,
+                m_chatterStatsManager->rebuildFromMessages(m_chatController->messages(),
                     [this](const UnifiedChatMessage& m) { return displayAuthorLabel(m); });
-                rebuildChatTable();
                 refreshChatterListDialog();
                 updateActionPanel();
             }
@@ -1650,34 +1539,14 @@ void MainWindow::onChatSelectionChanged()
 
 void MainWindow::onCopySelectedChat()
 {
-    if (!QGuiApplication::clipboard()) {
+    if (!QGuiApplication::clipboard() || !m_chatController) {
         return;
     }
-
-    const int row = selectedChatRow();
-    if (row < 0) {
+    if (selectedChatRow() < 0) {
         statusBar()->showMessage(tr("No chat selected."), 1500);
         return;
     }
-
-    QString copyText;
-    if (m_chatViewMode == ChatViewMode::Messenger) {
-        const QModelIndex idx = m_chatModel->index(row, 0);
-        copyText = idx.data(ChatMessageModel::CopyTextRole).toString();
-    } else {
-        QStringList cells;
-        cells.reserve(m_tblChat->columnCount());
-        for (int col = 0; col < m_tblChat->columnCount(); ++col) {
-            const QTableWidgetItem* item = m_tblChat->item(row, col);
-            QString value = item ? item->text() : QString();
-            if (value.isEmpty() && item) {
-                value = item->data(Qt::UserRole).toString();
-            }
-            cells.push_back(value);
-        }
-        copyText = cells.join(QStringLiteral("\t"));
-    }
-    QGuiApplication::clipboard()->setText(copyText);
+    m_chatController->copySelectedChat();
     statusBar()->showMessage(tr("Selected chat copied."), 1500);
 }
 
@@ -2186,12 +2055,29 @@ void MainWindow::setLiveBroadcastState(PlatformId platform, LiveBroadcastState s
             if (m_youtubeViewerCountTimer->isActive()) {
                 m_youtubeViewerCountTimer->stop();
             }
+            if (state == LiveBroadcastState::OFFLINE) {
+                // 명확한 종료 신호 — hysteresis 우회하여 즉시 placeholder 전환.
+                m_youtubeViewerMissStreak = OnionmixerChatManager::Viewers::kYouTubeViewerMissGraceCount;
+                m_youtubeViewerLastFreshAt = QDateTime();
+            }
+            // UNKNOWN/CHECKING/ERROR 는 일시적일 수 있으므로 updateViewerCount 경유
+            // (hysteresis로 유효값 유지). OFFLINE 은 위 스트릭 강제 세팅으로 즉시 리셋.
             updateViewerCount(PlatformId::YouTube, -1);
         }
     }
     if (platform == PlatformId::Chzzk && state != LiveBroadcastState::ONLINE) {
         updateViewerCount(PlatformId::Chzzk, -1);
     }
+
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // PLAN §6.4.5 platform_status broadcast.
+    if (m_broadChatServer) {
+        const PlatformRuntimeState runtime = m_platformRuntimeStates.value(platform);
+        const bool live = (state == LiveBroadcastState::ONLINE);
+        m_broadChatServer->broadcastPlatformStatus(
+            platform, liveBroadcastStateText(state), live, runtime.phase);
+    }
+#endif
 }
 
 QString MainWindow::liveBroadcastStateText(LiveBroadcastState state) const
@@ -2511,7 +2397,12 @@ void MainWindow::requestYouTubeViewerCount()
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         m_awaitingYouTubeViewerCount = false;
 
-        if (!m_youtubeViewerCountTimer || !m_youtubeViewerCountTimer->isActive()) {
+        // Step ③: timer stop 여부 대신 현재 방송 상태로 수용 판정.
+        // LiveBroadcastState가 ONLINE→UNKNOWN→ONLINE 로 일시 전이해 timer가 잠깐
+        // 멈춰도 의미 있는 응답이면 반영한다. 실제 OFFLINE 상태만 drop.
+        const LiveBroadcastState liveState =
+            m_liveStates.value(PlatformId::YouTube, LiveBroadcastState::UNKNOWN);
+        if (liveState == LiveBroadcastState::OFFLINE) {
             reply->deleteLater();
             return;
         }
@@ -2540,8 +2431,31 @@ void MainWindow::requestYouTubeViewerCount()
 
 void MainWindow::updateViewerCount(PlatformId platform, int count)
 {
+    // ①②④: YouTube는 연속 결측 히스테리시스·통계 누적·fresh 타임스탬프 관리.
+    // CHZZK는 현재 별도 폴링이 아니라 외부 이벤트로 갱신되므로 기존 동작 유지.
+    if (platform == PlatformId::YouTube) {
+        ++m_youtubeViewerTotalTicks;
+        if (count < 0) {
+            ++m_youtubeViewerMissTotal;
+            ++m_youtubeViewerMissStreak;
+            if (m_youtubeViewerMissStreak < OnionmixerChatManager::Viewers::kYouTubeViewerMissGraceCount) {
+                // 마지막 유효값 유지 — tooltip만 다시 그려 stale 표기 갱신.
+                refreshViewerCountDisplay();
+                return;
+            }
+            // grace 초과 → 실제 placeholder 전환.
+        } else {
+            m_youtubeViewerMissStreak = 0;
+            m_youtubeViewerLastFreshAt = QDateTime::currentDateTime();
+        }
+    }
+
     int& current = (platform == PlatformId::YouTube) ? m_youtubeViewerCount : m_chzzkViewerCount;
-    if (current == count) return;
+    if (current == count) {
+        // 값 동일이라도 stale tooltip은 시간 경과에 따라 바뀌므로 YouTube는 재렌더.
+        if (platform == PlatformId::YouTube) refreshViewerCountDisplay();
+        return;
+    }
     current = count;
     refreshViewerCountDisplay();
 }
@@ -2560,6 +2474,36 @@ void MainWindow::refreshViewerCountDisplay()
     m_lblChzzkViewers->setText(QStringLiteral("%1 %2")
         .arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk), formatCount(m_chzzkViewerCount)));
 
+    // ②④: YouTube 시청자 tooltip — 마지막 fresh 시점·연속 결측·누적 miss rate.
+    // concurrentViewers 필드가 YouTube 측에서 간헐적으로 빠지는 특성을 사용자·지원 담당자
+    // 모두가 인지할 수 있도록 상태 표기.
+    QString ytTooltip = tr("YouTube viewers (via Data API v3 concurrentViewers, polled every %1s)")
+        .arg(OnionmixerChatManager::Timings::kYouTubeViewerCountIntervalMs / 1000);
+    if (m_youtubeViewerLastFreshAt.isValid()) {
+        const qint64 ageMs = m_youtubeViewerLastFreshAt.msecsTo(QDateTime::currentDateTime());
+        const qint64 ageSec = ageMs / 1000;
+        if (ageMs >= OnionmixerChatManager::Viewers::kYouTubeViewerStaleThresholdMs) {
+            ytTooltip += QStringLiteral("\n") + tr("Stale: last fresh %1s ago").arg(ageSec);
+        } else {
+            ytTooltip += QStringLiteral("\n") + tr("Fresh: %1s ago").arg(ageSec);
+        }
+    } else {
+        ytTooltip += QStringLiteral("\n") + tr("No data received yet");
+    }
+    if (m_youtubeViewerMissStreak > 0) {
+        ytTooltip += QStringLiteral("\n") + tr("Miss streak: %1 / %2 (grace)")
+            .arg(m_youtubeViewerMissStreak)
+            .arg(OnionmixerChatManager::Viewers::kYouTubeViewerMissGraceCount);
+    }
+    if (m_youtubeViewerTotalTicks > 0) {
+        const double rate = 100.0 * double(m_youtubeViewerMissTotal) / double(m_youtubeViewerTotalTicks);
+        ytTooltip += QStringLiteral("\n") + tr("Miss rate: %1% (%2/%3 ticks)")
+            .arg(QString::number(rate, 'f', 1))
+            .arg(m_youtubeViewerMissTotal)
+            .arg(m_youtubeViewerTotalTicks);
+    }
+    m_lblYouTubeViewers->setToolTip(ytTooltip);
+
     int total = 0;
     bool hasAny = false;
     if (m_youtubeViewerCount >= 0) { total += m_youtubeViewerCount; hasAny = true; }
@@ -2570,6 +2514,12 @@ void MainWindow::refreshViewerCountDisplay()
     if (m_broadcastWindow) {
         m_broadcastWindow->updateViewerCount(m_youtubeViewerCount, m_chzzkViewerCount);
     }
+
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    if (m_broadChatServer) {
+        m_broadChatServer->broadcastViewerCount(m_youtubeViewerCount, m_chzzkViewerCount);
+    }
+#endif
 }
 
 void MainWindow::onOpenBroadcast()

@@ -18,6 +18,15 @@ namespace Timings {
     constexpr int kQuotaBackoffMs = 300000;
 }
 
+namespace Viewers {
+    // YouTube Data API `liveStreamingDetails.concurrentViewers`는 저시청자·라이브 경계
+    // 구간에서 간헐적으로 누락된다. 즉시 placeholder("—")로 전환하면 UI가 깜박이므로
+    // 연속 결측이 이 값 이상 누적된 뒤에만 리셋한다. (15s interval × 3 ≈ 45s grace)
+    constexpr int kYouTubeViewerMissGraceCount = 3;
+    // fresh 값 도착 후 이 시간이 지나면 tooltip에 stale 표기.
+    constexpr int kYouTubeViewerStaleThresholdMs = 20000;
+}
+
 namespace Limits {
     constexpr int kYouTubeSeenMessageIdsMax = 10000;
     constexpr int kChzzkSeenMessageIdsMax = 4000;
