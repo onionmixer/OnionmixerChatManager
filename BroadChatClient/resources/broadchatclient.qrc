@@ -1,0 +1,14 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/icons">
+    <!-- Tray/app icon — PNG 세트는 Qt가 size hint에 따라 자동 선택.
+         .ico / .icns 는 exe·번들 packaging 용 (QIcon 런타임 로드 시 미사용). -->
+    <file alias="tray_16.png">icons/tray_icon_16.png</file>
+    <file alias="tray_24.png">icons/tray_icon_24.png</file>
+    <file alias="tray_32.png">icons/tray_icon_32.png</file>
+    <file alias="tray_48.png">icons/tray_icon_48.png</file>
+    <file alias="tray_64.png">icons/tray_icon_64.png</file>
+    <file alias="tray_128.png">icons/tray_icon_128.png</file>
+    <file alias="tray_256.png">icons/tray_icon_256.png</file>
+  </qresource>
+</RCC>

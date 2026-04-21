@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=OnionmixerBroadChatClient
+GenericName=Broadcast Chat Overlay
+Comment=External broadcast overlay client for OnionmixerChatManager
+Exec=OnionmixerBroadChatClient
+Icon=onionmixer-bcc
+Terminal=false
+Categories=Network;Chat;AudioVideo;
+Keywords=chat;overlay;broadcast;youtube;chzzk;streaming;
+StartupNotify=true
+StartupWMClass=OnionmixerBroadChatClient

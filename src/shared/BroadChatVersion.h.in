@@ -1,0 +1,21 @@
+#ifndef ONIONMIXERCHATMANAGER_BROADCHATVERSION_H
+#define ONIONMIXERCHATMANAGER_BROADCHATVERSION_H
+
+// Auto-generated from BroadChatVersion.h.in by CMake. Do not edit manually.
+// PLAN §v24 D6·v25 C5·§17.1 — CMake project VERSION + git SHA + build date 주입.
+
+namespace BroadChatVersion {
+
+constexpr const char* kAppVersion = "@PROJECT_VERSION@";
+constexpr int kMajor = @PROJECT_VERSION_MAJOR@;
+constexpr int kMinor = @PROJECT_VERSION_MINOR@;
+constexpr int kPatch = @PROJECT_VERSION_PATCH@;
+
+// v25 C5 빌드 메타
+constexpr const char* kGitCommitShort = "@ONIONMIXERCHATMANAGER_GIT_SHA@";
+constexpr const char* kBuildDate = "@ONIONMIXERCHATMANAGER_BUILD_DATE@";
+
+// --version CLI 출력 포맷 helper (예: "OnionmixerChatManagerQt5 0.1.0 (abc1234) built=2026-04-18")
+} // namespace BroadChatVersion
+
+#endif

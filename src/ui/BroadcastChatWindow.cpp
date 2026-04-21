@@ -123,6 +123,14 @@ void BroadcastChatWindow::setTransparentMode(bool transparent)
     m_draggedDuringSuppress = false;
     m_suppressMoveEvent = true;
 
+    // v63: X11에서 `setWindowFlags`가 native window를 재생성할 때 ARGB visual 선택은
+    // 현재 `WA_TranslucentBackground` 속성을 참조함. 이 속성을 모드에 맞게
+    // `setWindowFlags` **이전에** 설정해야 재생성되는 native window에 올바른 visual
+    // (ARGB vs opaque) 이 선택됨. 클라처럼 opaque 기동 후 transparent로 toggle 시
+    // 이전까지는 alpha channel이 소실되어 채팅 본문이 보이지 않던 이슈 해결.
+    // 메인 앱 기존 동작 보존: 생성자 transparent=true 초기값과 동일 효과.
+    setAttribute(Qt::WA_TranslucentBackground, transparent);
+
     if (transparent) {
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
     } else {

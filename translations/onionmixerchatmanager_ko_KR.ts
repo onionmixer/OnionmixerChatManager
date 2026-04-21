@@ -65,6 +65,41 @@
     </message>
 </context>
 <context>
+    <name>BroadChatClientApp</name>
+    <message>
+        <source>인증 실패</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서버 인증 토큰 불일치. 설정 창에서 토큰을 수정한 뒤 재시도하거나 종료하세요.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>버전 불일치</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서버와 클라이언트 프로토콜 버전이 호환되지 않습니다. 업그레이드가 필요합니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>연결 중단</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서버와 연결이 영구 중단되었습니다 (사유: %1).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>설정 수정</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>종료</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>BroadcastChatWindow</name>
     <message>
         <source>Broadcast Chat</source>
@@ -131,6 +166,65 @@
     <message>
         <source>CHZZK</source>
         <translation>CHZZK</translation>
+    </message>
+</context>
+<context>
+    <name>ClientConfigDialog</name>
+    <message>
+        <source>BroadChat Client Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>메인 앱 서버 주소 (IP 또는 호스트명)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>메인 앱 서버 TCP 포트. 메인 앱 설정의 BroadChat Port와 동일해야 함</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>(empty = no authentication)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>메인 앱에서 생성한 토큰을 붙여넣기. 빈 값이면 인증 안 함</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>토큰 문자열을 화면에 표시</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation type="unfinished">지움</translation>
+    </message>
+    <message>
+        <source>Host</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auth Token</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear Token</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>인증 기능을 비활성화합니다. 계속하시겠습니까?</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -568,6 +662,76 @@ copied_at_local: %2
     <message>
         <source>Opaque Preview</source>
         <translation>불투명 프리뷰</translation>
+    </message>
+    <message>
+        <source>BroadChat Security Warning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat이 외부 네트워크(0.0.0.0)에 인증 토큰 없이 공개됩니다.
+원격 연결 시 Auth Token 설정을 권장합니다.
+
+계속하시겠습니까?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>외부 BroadChatClient 앱이 접속할 TCP 포트. ini [broadchat] tcp_port와 동일. 변경 후 재시작 필요</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>(empty = no authentication)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>빈 값이면 인증 없음. Generate 버튼으로 UUID v4 자동 생성. BroadChatClient의 설정에도 동일 값 필수. ini [broadchat] auth_token 으로 직접 편집도 가능. 변경 후 재시작 필요</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Generate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat Port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat Auth Token</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Overwrite Token</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>기존 토큰을 새 UUID로 덮어씁니다. 계속하시겠습니까?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear Token</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>인증 기능을 비활성화합니다. 계속하시겠습니까?</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MainBroadcastWindow</name>
+    <message>
+        <source>세팅</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>종료</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1243,6 +1407,38 @@ Hint: YouTube AUTH_CODE_GRANT failed at token exchange.
     <message>
         <source>CHZZK</source>
         <translation>CHZZK</translation>
+    </message>
+    <message>
+        <source>BroadChat: off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>clients: 0</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat: listening :%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>clients: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat: error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat Listen Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>BroadChat 서버 listen에 실패했습니다.
+
+%1
+
+설정 창에서 port 또는 bind 주소를 변경한 후 재시작해주세요.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

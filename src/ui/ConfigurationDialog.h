@@ -85,6 +85,12 @@ private:
     QCheckBox* m_chkChatFontItalic = nullptr;
     QSpinBox* m_spnChatLineSpacing = nullptr;
     QSpinBox* m_spnChatMaxMessages = nullptr;
+    // v18-12·v21-α BroadChat 설정 (General 탭)
+    QSpinBox* m_spnBroadChatPort = nullptr;
+    QLineEdit* m_edtBroadChatAuthToken = nullptr;
+    QPushButton* m_btnBroadChatGenerate = nullptr;
+    QPushButton* m_btnBroadChatCopy = nullptr;
+    QPushButton* m_btnBroadChatClear = nullptr;
     QWidget* m_chatPreviewContainer = nullptr;
     class QListView* m_chatPreviewList = nullptr;
     class ChatMessageModel* m_chatPreviewModel = nullptr;

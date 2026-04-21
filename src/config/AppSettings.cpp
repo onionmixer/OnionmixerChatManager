@@ -1,9 +1,13 @@
 #include "config/AppSettings.h"
 
+#include "shared/BroadChatEndpoint.h"
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFontDatabase>
+#include <QLoggingCategory>
 #include <QSettings>
 #include <utility>
 
@@ -163,6 +167,59 @@ AppSettingsSnapshot AppSettings::load() const
     snapshot.broadcastChatOutlineColor = s.value(QStringLiteral("chat_outline_color"), QString()).toString();
     s.endGroup();
 
+    // v18-7 [broadchat] 섹션
+    s.beginGroup(QStringLiteral("broadchat"));
+    snapshot.broadchatEnabled = s.value(QStringLiteral("enabled"), true).toBool();
+    snapshot.broadchatTcpBind = s.value(QStringLiteral("tcp_bind"), QStringLiteral("127.0.0.1")).toString().trimmed();
+    snapshot.broadchatTcpPort = s.value(QStringLiteral("tcp_port"), 47123).toInt();
+    snapshot.broadchatAuthToken = s.value(QStringLiteral("auth_token"), QString()).toString().trimmed();
+    snapshot.broadchatMaxClients = s.value(QStringLiteral("max_clients"), 10).toInt();
+    snapshot.broadchatRejectDuplicateClientId = s.value(QStringLiteral("reject_duplicate_client_id"), false).toBool();
+    snapshot.broadchatDuplicateKickTarget = s.value(QStringLiteral("duplicate_kick_target"), QStringLiteral("newest")).toString();
+    snapshot.broadchatTrace = s.value(QStringLiteral("trace"), false).toBool();
+    s.endGroup();
+
+    // v24 D1: broadchat 값 유효성 검증·정규화
+    {
+        const QString rawBind = snapshot.broadchatTcpBind;
+        const QString bind = BroadChatEndpoint::normalizeBindAddress(rawBind);
+        if (bind != rawBind) {
+            qWarning("[broadchat] invalid tcp_bind '%s' — falling back to %s",
+                     qUtf8Printable(rawBind), qUtf8Printable(bind));
+            snapshot.broadchatTcpBind = bind;
+        }
+        const int rawPort = snapshot.broadchatTcpPort;
+        const quint16 port = BroadChatEndpoint::normalizePort(rawPort);
+        if (rawPort != port) {
+            qWarning("[broadchat] tcp_port %d out of range — using %u",
+                     rawPort, port);
+            snapshot.broadchatTcpPort = port;
+        }
+        if (snapshot.broadchatMaxClients < 1 || snapshot.broadchatMaxClients > 100) {
+            qWarning("[broadchat] max_clients %d out of range (1~100) — using 10",
+                     snapshot.broadchatMaxClients);
+            snapshot.broadchatMaxClients = 10;
+        }
+        // §v21-γ-7 auth_token ASCII 규약: 1~128자, 인쇄 가능 ASCII만
+        if (!snapshot.broadchatAuthToken.isEmpty()) {
+            bool valid = snapshot.broadchatAuthToken.size() <= 128;
+            for (QChar c : snapshot.broadchatAuthToken) {
+                const ushort u = c.unicode();
+                if (u < 0x21 || u > 0x7E) { valid = false; break; }
+            }
+            if (!valid) {
+                qWarning("[broadchat] auth_token contains invalid chars or length — treating as empty");
+                snapshot.broadchatAuthToken.clear();
+            }
+        }
+        // duplicate_kick_target: newest / oldest만 허용
+        if (snapshot.broadchatDuplicateKickTarget != QStringLiteral("newest") &&
+            snapshot.broadchatDuplicateKickTarget != QStringLiteral("oldest")) {
+            qWarning("[broadchat] duplicate_kick_target invalid — using 'newest'");
+            snapshot.broadchatDuplicateKickTarget = QStringLiteral("newest");
+        }
+    }
+
     snapshot.loadedAtUtc = QDateTime::currentDateTimeUtc();
     return snapshot;
 }
@@ -200,6 +257,22 @@ bool AppSettings::save(const AppSettingsSnapshot& snapshot) const
     s.setValue(QStringLiteral("chat_outline_color"), snapshot.broadcastChatOutlineColor);
     s.endGroup();
 
+    // v18-7 [broadchat] 섹션
+    s.beginGroup(QStringLiteral("broadchat"));
+    s.setValue(QStringLiteral("enabled"), snapshot.broadchatEnabled);
+    s.setValue(QStringLiteral("tcp_bind"), snapshot.broadchatTcpBind);
+    s.setValue(QStringLiteral("tcp_port"), snapshot.broadchatTcpPort);
+    s.setValue(QStringLiteral("auth_token"), snapshot.broadchatAuthToken);
+    s.setValue(QStringLiteral("max_clients"), snapshot.broadchatMaxClients);
+    s.setValue(QStringLiteral("reject_duplicate_client_id"), snapshot.broadchatRejectDuplicateClientId);
+    s.setValue(QStringLiteral("duplicate_kick_target"), snapshot.broadchatDuplicateKickTarget);
+    s.setValue(QStringLiteral("trace"), snapshot.broadchatTrace);
+    s.endGroup();
+
     s.sync();
+
+    // v21-γ-8 파일 권한 0600 (소유자만 read/write)
+    QFile::setPermissions(m_iniPath, QFile::ReadOwner | QFile::WriteOwner);
+
     return s.status() == QSettings::NoError;
 }

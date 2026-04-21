@@ -23,7 +23,10 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QApplication>
 #include <QClipboard>
+#include <QMessageBox>
+#include <QUuid>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -329,6 +332,16 @@ void ConfigurationDialog::setSnapshot(const AppSettingsSnapshot& snapshot)
     m_spnChatLineSpacing->setValue(snapshot.chatLineSpacing >= 0 ? snapshot.chatLineSpacing : 3);
     m_spnChatMaxMessages->setValue(snapshot.chatMaxMessages > 0 ? snapshot.chatMaxMessages : 5000);
 
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    if (m_spnBroadChatPort) {
+        const int port = snapshot.broadchatTcpPort;
+        m_spnBroadChatPort->setValue(port >= 1024 && port <= 65535 ? port : 47123);
+    }
+    if (m_edtBroadChatAuthToken) {
+        m_edtBroadChatAuthToken->setText(snapshot.broadchatAuthToken);
+    }
+#endif
+
     m_ytChkEnabled->setChecked(snapshot.youtube.enabled);
     m_ytEdtClientId->setText(snapshot.youtube.clientId);
     m_ytEdtClientSecret->setText(snapshot.youtube.clientSecret);
@@ -618,6 +631,23 @@ void ConfigurationDialog::onApplyClicked()
         return;
     }
 
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // PLAN §20.8 v18-13·v22-5: bind=0.0.0.0 + auth_token 빈 값 조합은 외부 노출 위험.
+    // bind는 GUI에 없으므로 ini 수동 설정값을 snapshot으로 검사.
+    if (snapshot.broadchatEnabled
+        && snapshot.broadchatTcpBind == QStringLiteral("0.0.0.0")
+        && snapshot.broadchatAuthToken.isEmpty()) {
+        const auto r = QMessageBox::warning(this, tr("BroadChat Security Warning"),
+            tr("BroadChat이 외부 네트워크(0.0.0.0)에 인증 토큰 없이 공개됩니다.\n"
+               "원격 연결 시 Auth Token 설정을 권장합니다.\n\n계속하시겠습니까?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (r != QMessageBox::Yes) {
+            m_statusBar->showMessage(tr("Apply cancelled."), 4000);
+            return;
+        }
+    }
+#endif
+
     emit configApplyRequested(snapshot);
         m_statusBar->showMessage(tr("Configuration applied."), OnionmixerChatManager::Timings::kStatusBarDisplayMs);
 }
@@ -779,6 +809,69 @@ QWidget* ConfigurationDialog::createGeneralTab()
     layout->addRow(tr("Chat Font Style"), fontStyleWrap);
     layout->addRow(tr("Chat Line Spacing"), m_spnChatLineSpacing);
     layout->addRow(tr("Chat Max Messages"), m_spnChatMaxMessages);
+
+    // v18-12·v21-α·v21-β·v21-γ BroadChat 서버 설정 (General 탭 하단)
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    m_spnBroadChatPort = new QSpinBox(page);
+    m_spnBroadChatPort->setObjectName(QStringLiteral("spnBroadChatPort"));
+    m_spnBroadChatPort->setRange(1024, 65535);
+    m_spnBroadChatPort->setValue(47123);
+    m_spnBroadChatPort->setToolTip(tr("외부 BroadChatClient 앱이 접속할 TCP 포트. "
+                                      "ini [broadchat] tcp_port와 동일. 변경 후 재시작 필요"));
+
+    m_edtBroadChatAuthToken = new QLineEdit(page);
+    m_edtBroadChatAuthToken->setObjectName(QStringLiteral("edtBroadChatAuthToken"));
+    m_edtBroadChatAuthToken->setEchoMode(QLineEdit::Password);
+    m_edtBroadChatAuthToken->setPlaceholderText(tr("(empty = no authentication)"));
+    m_edtBroadChatAuthToken->setToolTip(tr("빈 값이면 인증 없음. Generate 버튼으로 UUID v4 자동 생성. "
+                                           "BroadChatClient의 설정에도 동일 값 필수. "
+                                           "ini [broadchat] auth_token 으로 직접 편집도 가능. 변경 후 재시작 필요"));
+
+    m_btnBroadChatGenerate = new QPushButton(tr("Generate"), page);
+    m_btnBroadChatCopy = new QPushButton(tr("Copy"), page);
+    m_btnBroadChatClear = new QPushButton(tr("Clear"), page);
+
+    auto* tokenWrap = new QWidget(page);
+    auto* tokenLayout = new QHBoxLayout(tokenWrap);
+    tokenLayout->setContentsMargins(0, 0, 0, 0);
+    tokenLayout->setSpacing(4);
+    tokenLayout->addWidget(m_edtBroadChatAuthToken, /*stretch=*/1);
+    tokenLayout->addWidget(m_btnBroadChatGenerate);
+    tokenLayout->addWidget(m_btnBroadChatCopy);
+    tokenLayout->addWidget(m_btnBroadChatClear);
+
+    layout->addRow(tr("BroadChat Port"), m_spnBroadChatPort);
+    layout->addRow(tr("BroadChat Auth Token"), tokenWrap);
+
+    // v21-β UUID v4 Generate
+    connect(m_btnBroadChatGenerate, &QPushButton::clicked, this, [this]() {
+        // v21-γ-2 덮어쓰기 확인
+        if (!m_edtBroadChatAuthToken->text().trimmed().isEmpty()) {
+            const auto r = QMessageBox::question(this, tr("Overwrite Token"),
+                tr("기존 토큰을 새 UUID로 덮어씁니다. 계속하시겠습니까?"),
+                QMessageBox::Yes | QMessageBox::No);
+            if (r != QMessageBox::Yes) return;
+        }
+        const QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_edtBroadChatAuthToken->setText(uuid);
+    });
+
+    connect(m_btnBroadChatCopy, &QPushButton::clicked, this, [this]() {
+        const QString text = m_edtBroadChatAuthToken->text().trimmed();
+        QApplication::clipboard()->setText(text);
+    });
+
+    connect(m_btnBroadChatClear, &QPushButton::clicked, this, [this]() {
+        // v21-γ-5 Clear 확인
+        if (!m_edtBroadChatAuthToken->text().trimmed().isEmpty()) {
+            const auto r = QMessageBox::question(this, tr("Clear Token"),
+                tr("인증 기능을 비활성화합니다. 계속하시겠습니까?"),
+                QMessageBox::Yes | QMessageBox::No);
+            if (r != QMessageBox::Yes) return;
+        }
+        m_edtBroadChatAuthToken->clear();
+    });
+#endif
 
     auto* previewGroup = new QGroupBox(tr("Chat Preview"), page);
     m_chatPreviewModel = new ChatMessageModel(this);
@@ -1109,6 +1202,15 @@ AppSettingsSnapshot ConfigurationDialog::collectSnapshot() const
     snapshot.chatFontItalic = m_chkChatFontItalic->isChecked();
     snapshot.chatLineSpacing = m_spnChatLineSpacing->value();
     snapshot.chatMaxMessages = m_spnChatMaxMessages->value();
+#ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
+    // v21-γ-6 trim 정책 적용 후 저장
+    if (m_spnBroadChatPort) {
+        snapshot.broadchatTcpPort = m_spnBroadChatPort->value();
+    }
+    if (m_edtBroadChatAuthToken) {
+        snapshot.broadchatAuthToken = m_edtBroadChatAuthToken->text().trimmed();
+    }
+#endif
     snapshot.youtube = collectPlatformSettings(PlatformId::YouTube);
     snapshot.chzzk = collectPlatformSettings(PlatformId::Chzzk);
 

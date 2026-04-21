@@ -1,0 +1,5 @@
+// v71: Windows 실행파일 아이콘 embedding.
+// MinGW `windres` 또는 MSVC `rc.exe` 가 컴파일 시 exe 에 ICON 리소스 첨부.
+// 영향: Windows Explorer 에서 exe 파일 자체에 아이콘 표시 + taskbar/alt-tab 기본 아이콘.
+// 런타임 QIcon(":/icons/tray_256.png") 과 별도 — 이건 exe 메타데이터 레벨.
+IDI_ICON1 ICON DISCARDABLE "icons/tray_icon.ico"

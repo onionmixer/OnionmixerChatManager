@@ -65,6 +65,16 @@ struct AppSettingsSnapshot {
     QString broadcastChatBodyFontColor;
     QString broadcastChatOutlineColor;
 
+    // v18-14·v22 BroadChat TCP 서버 설정
+    bool broadchatEnabled = true;
+    QString broadchatTcpBind = QStringLiteral("127.0.0.1");
+    int broadchatTcpPort = 47123;
+    QString broadchatAuthToken; // 빈 값 = 인증 off
+    int broadchatMaxClients = 10;
+    bool broadchatRejectDuplicateClientId = false;
+    QString broadchatDuplicateKickTarget = QStringLiteral("newest");
+    bool broadchatTrace = false;
+
     QDateTime loadedAtUtc;
 };
 

@@ -21,6 +21,13 @@ public:
     void applySettings(const AppSettingsSnapshot& snapshot);
     void updateViewerCount(int youtubeCount, int chzzkCount);
 
+    // PLAN §7.1·§18.2: 투명/불투명 모드 외부 제어.
+    // 기본 생성자는 m_transparentMode=true (투명). 외부에서 초기값 설정이 필요하면
+    // 이 메서드를 호출. 내부 mouseDoubleClickEvent 토글 로직은 동일 경로 재사용.
+    // (과거 private → public 승격. 메인 앱의 내부 사용 경로는 영향 없음.)
+    void setTransparentMode(bool transparent);
+    bool isTransparentMode() const { return m_transparentMode; }
+
 signals:
     void windowResized(int width, int height);
     void windowMoved(int x, int y);
@@ -32,7 +39,6 @@ protected:
     void moveEvent(QMoveEvent* event) override;
 
 private:
-    void setTransparentMode(bool transparent);
     void repositionViewerCountOverlay();
 
     // Viewer count rendering (Phase 2: CenterLeft/CenterRight rotation support)

@@ -1,0 +1,13 @@
+// Generated from version.h.in — do not edit directly.
+// CMake configure_file substitutes @VAR@ placeholders with git-describe + build date.
+// See BroadChatClient/CMakeLists.txt.
+
+#pragma once
+
+namespace BroadChatClientVersion {
+
+constexpr const char* kVersion    = "@ONIONMIXERCHATMANAGER_BCC_VERSION@";
+constexpr const char* kGitHash    = "@ONIONMIXERCHATMANAGER_BCC_GIT_HASH@";
+constexpr const char* kBuildDate  = "@ONIONMIXERCHATMANAGER_BCC_BUILD_DATE@";
+
+} // namespace BroadChatClientVersion
