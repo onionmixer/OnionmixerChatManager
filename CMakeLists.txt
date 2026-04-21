@@ -12,6 +12,8 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt5 REQUIRED COMPONENTS Core Widgets Network)
 find_package(Qt5 COMPONENTS WebSockets QUIET)
 find_package(Qt5 COMPONENTS LinguistTools QUIET)
+find_package(Qt5 COMPONENTS X11Extras QUIET)
+find_package(X11 QUIET)
 find_package(PkgConfig QUIET)
 
 option(ONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST "Enable YouTube liveChatMessages.streamList gRPC transport when dependencies are available" ON)
@@ -151,6 +153,14 @@ target_link_libraries(onionmixer_chat_shared PUBLIC
     Qt5::Widgets
     Qt5::Network
 )
+if (TARGET Qt5::X11Extras AND X11_FOUND)
+    target_link_libraries(onionmixer_chat_shared PUBLIC Qt5::X11Extras X11::X11)
+    target_compile_definitions(onionmixer_chat_shared PUBLIC
+        ONIONMIXERCHATMANAGER_HAS_QT_X11_EXTRAS=1)
+else()
+    target_compile_definitions(onionmixer_chat_shared PUBLIC
+        ONIONMIXERCHATMANAGER_HAS_QT_X11_EXTRAS=0)
+endif()
 
 set_target_properties(onionmixer_chat_shared PROPERTIES AUTOMOC ON)
 

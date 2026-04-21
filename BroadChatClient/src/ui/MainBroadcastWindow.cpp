@@ -74,17 +74,14 @@ void MainBroadcastWindow::setupOverlays()
     if (!m_window) return;
     QWidget* host = m_window.get();
 
-    // #11: 연결 상태 원형 배지 (QLabel + stylesheet 로 원형 렌더).
-    // 투명/불투명 모드 공통. 투명 시 frameless 라 우상단 8x8 작은 점.
-    // v74: QGraphicsOpacityEffect 제거 — `WA_TranslucentBackground` 창의 child 에 걸린
-    // graphics effect 가 paint 경로를 software raster 로 강제해 QListView 투명 배경이
-    // 깨지는 알려진 Qt 이슈 회피. fade 효과는 5초 후 `setVisible(false)` 단일 토글로 대체.
-    m_statusBadge = new QLabel(host);
-    m_statusBadge->setFixedSize(12, 12);
-    m_statusBadge->setToolTip(tr("연결 상태"));
-    refreshBadgeStyle();
-    m_statusBadge->raise();
-    m_statusBadge->show();
+    // #11: 연결 상태 원형 배지.
+    // 사용자 요청에 따라 화면 배지는 비활성화. 연결 상태는 tray tooltip/log 로 확인한다.
+    // m_statusBadge = new QLabel(host);
+    // m_statusBadge->setFixedSize(12, 12);
+    // m_statusBadge->setToolTip(tr("연결 상태"));
+    // refreshBadgeStyle();
+    // m_statusBadge->raise();
+    // m_statusBadge->show();
 
     // #12: viewer count "—" 플레이스홀더. 5초 타이머로 연결 후에도 viewer 미수신 상태 감지.
     m_viewerPlaceholder = new QLabel(QStringLiteral("—"), host);
@@ -341,10 +338,17 @@ bool MainBroadcastWindow::eventFilter(QObject* watched, QEvent* event)
         if (event->type() == QEvent::ContextMenu) {
             auto* ctx = static_cast<QContextMenuEvent*>(event);
             QMenu menu(m_window.get());
+            m_window->syncAlwaysOnTopState();
+            QAction* actAlwaysOnTop = menu.addAction(tr("Always on Top"));
+            actAlwaysOnTop->setCheckable(true);
+            actAlwaysOnTop->setChecked(m_window->isAlwaysOnTop());
+            menu.addSeparator();
             QAction* actSettings = menu.addAction(tr("세팅"));
             QAction* actQuit = menu.addAction(tr("종료"));
             QAction* chosen = menu.exec(ctx->globalPos());
-            if (chosen == actSettings) {
+            if (chosen == actAlwaysOnTop) {
+                m_window->setAlwaysOnTop(actAlwaysOnTop->isChecked());
+            } else if (chosen == actSettings) {
                 emit settingsRequested();
             } else if (chosen == actQuit) {
                 emit quitRequested();

@@ -28,6 +28,10 @@ public:
     void setTransparentMode(bool transparent);
     bool isTransparentMode() const { return m_transparentMode; }
 
+    void setAlwaysOnTop(bool enabled);
+    bool isAlwaysOnTop() const { return m_alwaysOnTop; }
+    void syncAlwaysOnTopState();
+
 signals:
     void windowResized(int width, int height);
     void windowMoved(int x, int y);
@@ -37,8 +41,13 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void moveEvent(QMoveEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
+    Qt::WindowFlags windowFlagsForCurrentMode() const;
+    void applyWindowFlagsPreservingGeometry(bool forceShow);
+    bool applyNativeAlwaysOnTopState();
+    bool queryNativeAlwaysOnTopState(bool* enabled) const;
     void repositionViewerCountOverlay();
 
     // Viewer count rendering (Phase 2: CenterLeft/CenterRight rotation support)
@@ -51,6 +60,7 @@ private:
     ChatBubbleDelegate* m_delegate = nullptr;
     QLabel* m_viewerCountLabel = nullptr;
     bool m_transparentMode = true;
+    bool m_alwaysOnTop = true;
     QPoint m_dragStartPos;
     bool m_dragging = false;
     bool m_suppressMoveEvent = false;

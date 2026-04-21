@@ -1,7 +1,7 @@
 # PLAN_DEV_BROADCHATCLIENT §12 · §16.13 UAT 매트릭스 대응 유닛 테스트.
 # 실행: cmake --build build && ctest --test-dir build --output-on-failure -R BroadChat
 
-find_package(Qt5 5.15 REQUIRED COMPONENTS Core Network Test)
+find_package(Qt5 5.15 REQUIRED COMPONENTS Core Network Widgets Test)
 
 set(CMAKE_AUTOMOC ON)
 
@@ -89,6 +89,20 @@ target_link_libraries(tst_broadchat_overlay_layout PRIVATE
 )
 add_test(NAME BroadChat.OverlayLayout
          COMMAND tst_broadchat_overlay_layout)
+
+# ─── tst_broadcast_window_flags: transparent/opaque window flag invariants ──
+add_executable(tst_broadchat_broadcast_window_flags
+    tst_broadcast_window_flags.cpp
+)
+target_link_libraries(tst_broadchat_broadcast_window_flags PRIVATE
+    onionmixer_chat_shared
+    Qt5::Core
+    Qt5::Network
+    Qt5::Widgets
+    Qt5::Test
+)
+add_test(NAME BroadChat.BroadcastWindowFlags
+         COMMAND tst_broadchat_broadcast_window_flags)
 
 # ─── tst_ini_validator: §5.6.8 v57-1 · v74 IniValidator ─────────────────────
 add_executable(tst_broadchat_ini_validator

@@ -16,17 +16,25 @@
 #include <QMoveEvent>
 #include <QPainter>
 #include <QPixmap>
+#include <QShowEvent>
 #include <QStringList>
 #include <QTextDocument>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#if ONIONMIXERCHATMANAGER_HAS_QT_X11_EXTRAS
+#  include <QX11Info>
+#  include <cstring>
+#  include <X11/Xatom.h>
+#  include <X11/Xlib.h>
+#endif
 
 BroadcastChatWindow::BroadcastChatWindow(ChatMessageModel* model, EmojiImageCache* emojiCache, QWidget* parent)
     : QWidget(parent)
 {
     setWindowTitle(tr("Broadcast Chat"));
 
-    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
+    setWindowFlags(windowFlagsForCurrentMode());
     setAttribute(Qt::WA_TranslucentBackground, true);
     m_transparentMode = true;
 
@@ -115,13 +123,63 @@ void BroadcastChatWindow::moveEvent(QMoveEvent* event)
     }
 }
 
-void BroadcastChatWindow::setTransparentMode(bool transparent)
+void BroadcastChatWindow::showEvent(QShowEvent* event)
 {
-    m_transparentMode = transparent;
+    QWidget::showEvent(event);
+    applyNativeAlwaysOnTopState();
+}
+
+Qt::WindowFlags BroadcastChatWindow::windowFlagsForCurrentMode() const
+{
+    Qt::WindowFlags flags = m_transparentMode
+        ? (Qt::FramelessWindowHint | Qt::Tool)
+        : Qt::Window;
+    if (m_alwaysOnTop) {
+        flags |= Qt::WindowStaysOnTopHint;
+    }
+    return flags;
+}
+
+void BroadcastChatWindow::applyWindowFlagsPreservingGeometry(bool forceShow)
+{
+    const bool wasVisible = isVisible();
     const QSize savedSize = size();
+    const QPoint savedPos = m_lastUserPosition;
 
     m_draggedDuringSuppress = false;
     m_suppressMoveEvent = true;
+
+    setWindowFlags(windowFlagsForCurrentMode());
+    // 방송창은 투명/불투명 모드 모두 스크롤바 비표시 유지 (휠 스크롤은 정상 동작)
+    // Use setGeometry (not move) in both modes: Qt5/X11 retains stale frame margin
+    // cache across setWindowFlags, which makes move() place the native window offset
+    // by the old title-bar height. setGeometry sets crect directly, bypassing it.
+    setGeometry(savedPos.x(), savedPos.y(), savedSize.width(), savedSize.height());
+
+    if (forceShow || wasVisible) {
+        show();
+        if (m_alwaysOnTop) {
+            raise();
+        }
+        applyNativeAlwaysOnTopState();
+        QTimer::singleShot(0, this, [this]() {
+            applyNativeAlwaysOnTopState();
+        });
+    }
+    update();
+
+    QTimer::singleShot(50, this, [this, savedPos, savedSize]() {
+        if (m_transparentMode && !m_draggedDuringSuppress) {
+            setGeometry(savedPos.x(), savedPos.y(), savedSize.width(), savedSize.height());
+        }
+        m_suppressMoveEvent = false;
+        m_draggedDuringSuppress = false;
+    });
+}
+
+void BroadcastChatWindow::setTransparentMode(bool transparent)
+{
+    m_transparentMode = transparent;
 
     // v63: X11에서 `setWindowFlags`가 native window를 재생성할 때 ARGB visual 선택은
     // 현재 `WA_TranslucentBackground` 속성을 참조함. 이 속성을 모드에 맞게
@@ -130,28 +188,148 @@ void BroadcastChatWindow::setTransparentMode(bool transparent)
     // 이전까지는 alpha channel이 소실되어 채팅 본문이 보이지 않던 이슈 해결.
     // 메인 앱 기존 동작 보존: 생성자 transparent=true 초기값과 동일 효과.
     setAttribute(Qt::WA_TranslucentBackground, transparent);
+    applyWindowFlagsPreservingGeometry(true);
+}
 
-    if (transparent) {
-        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
-    } else {
-        setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
+void BroadcastChatWindow::setAlwaysOnTop(bool enabled)
+{
+    if (m_alwaysOnTop == enabled) {
+        return;
     }
-    // 방송창은 투명/불투명 모드 모두 스크롤바 비표시 유지 (휠 스크롤은 정상 동작)
-    // Use setGeometry (not move) in both modes: Qt5/X11 retains stale frame margin
-    // cache across setWindowFlags, which makes move() place the native window offset
-    // by the old title-bar height. setGeometry sets crect directly, bypassing it.
-    setGeometry(m_lastUserPosition.x(), m_lastUserPosition.y(),
-                savedSize.width(), savedSize.height());
-    show();
-    update();
+    m_alwaysOnTop = enabled;
+    setAttribute(Qt::WA_TranslucentBackground, m_transparentMode);
 
-    QTimer::singleShot(50, this, [this, savedPos = m_lastUserPosition, savedSize = size()]() {
-        if (m_transparentMode && !m_draggedDuringSuppress) {
-            setGeometry(savedPos.x(), savedPos.y(), savedSize.width(), savedSize.height());
+    // On X11, a visible window can update _NET_WM_STATE_ABOVE without
+    // rebuilding native window flags. This matches GNOME's title-bar menu path
+    // and avoids frame/client geometry drift from setWindowFlags().
+    if (applyNativeAlwaysOnTopState()) {
+        if (m_alwaysOnTop) {
+            raise();
         }
-        m_suppressMoveEvent = false;
-        m_draggedDuringSuppress = false;
-    });
+        return;
+    }
+
+    applyWindowFlagsPreservingGeometry(false);
+}
+
+void BroadcastChatWindow::syncAlwaysOnTopState()
+{
+    bool enabled = false;
+    if (queryNativeAlwaysOnTopState(&enabled)) {
+        m_alwaysOnTop = enabled;
+    }
+}
+
+bool BroadcastChatWindow::applyNativeAlwaysOnTopState()
+{
+#if ONIONMIXERCHATMANAGER_HAS_QT_X11_EXTRAS
+    if (!isVisible() || !QX11Info::isPlatformX11()) {
+        return false;
+    }
+
+    Display* display = QX11Info::display();
+    if (!display) {
+        return false;
+    }
+
+    const WId wid = winId();
+    if (!wid) {
+        return false;
+    }
+
+    const Atom wmState = XInternAtom(display, "_NET_WM_STATE", False);
+    const Atom stateAbove = XInternAtom(display, "_NET_WM_STATE_ABOVE", False);
+    if (wmState == None || stateAbove == None) {
+        return false;
+    }
+
+    XEvent event;
+    std::memset(&event, 0, sizeof(event));
+    event.xclient.type = ClientMessage;
+    event.xclient.window = static_cast<Window>(wid);
+    event.xclient.message_type = wmState;
+    event.xclient.format = 32;
+    event.xclient.data.l[0] = m_alwaysOnTop ? 1 : 0;  // _NET_WM_STATE_ADD / REMOVE
+    event.xclient.data.l[1] = static_cast<long>(stateAbove);
+    event.xclient.data.l[2] = 0;
+    event.xclient.data.l[3] = 1;  // normal application source indication
+    event.xclient.data.l[4] = 0;
+
+    XSendEvent(display, QX11Info::appRootWindow(), False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &event);
+    XFlush(display);
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool BroadcastChatWindow::queryNativeAlwaysOnTopState(bool* enabled) const
+{
+#if ONIONMIXERCHATMANAGER_HAS_QT_X11_EXTRAS
+    if (!enabled || !isVisible() || !QX11Info::isPlatformX11()) {
+        return false;
+    }
+
+    Display* display = QX11Info::display();
+    if (!display) {
+        return false;
+    }
+
+    const WId wid = winId();
+    if (!wid) {
+        return false;
+    }
+
+    const Atom wmState = XInternAtom(display, "_NET_WM_STATE", False);
+    const Atom stateAbove = XInternAtom(display, "_NET_WM_STATE_ABOVE", False);
+    if (wmState == None || stateAbove == None) {
+        return false;
+    }
+
+    Atom actualType = None;
+    int actualFormat = 0;
+    unsigned long itemCount = 0;
+    unsigned long bytesAfter = 0;
+    unsigned char* data = nullptr;
+
+    const int status = XGetWindowProperty(
+        display,
+        static_cast<Window>(wid),
+        wmState,
+        0,
+        1024,
+        False,
+        XA_ATOM,
+        &actualType,
+        &actualFormat,
+        &itemCount,
+        &bytesAfter,
+        &data);
+
+    if (status != Success || actualType != XA_ATOM || actualFormat != 32 || !data) {
+        if (data) {
+            XFree(data);
+        }
+        return false;
+    }
+
+    bool hasAbove = false;
+    const auto* atoms = reinterpret_cast<const Atom*>(data);
+    for (unsigned long i = 0; i < itemCount; ++i) {
+        if (atoms[i] == stateAbove) {
+            hasAbove = true;
+            break;
+        }
+    }
+    XFree(data);
+
+    *enabled = hasAbove;
+    return true;
+#else
+    Q_UNUSED(enabled);
+    return false;
+#endif
 }
 
 void BroadcastChatWindow::repositionViewerCountOverlay()
