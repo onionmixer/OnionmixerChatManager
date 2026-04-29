@@ -33,11 +33,25 @@ set(ONIONMIXERCHATMANAGER_YT_STREAMLIST_GENERATED_SRCS)
 set(ONIONMIXERCHATMANAGER_YT_STREAMLIST_GENERATED_HDRS)
 
 if (ONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST)
+    # 1차: CMake 내장 FindProtobuf 모듈 + gRPC CONFIG. Linux apt 환경에서는
+    # FindProtobuf 가 첫 시도에 성공 → 아래 2차 CONFIG fallback 진입 안 함.
     find_package(Protobuf QUIET)
     find_package(gRPC QUIET)
+
+    # 2차: CONFIG mode fallback — vcpkg 가 export 하는 ProtobufConfig.cmake /
+    # gRPCConfig.cmake 를 명시적으로 시도. 1차에서 발견된 경우 진입 안 함.
+    # PR5b 추가 — Windows vcpkg 통합 (PR5c) 의 사전 작업. Linux 환경 무영향.
+    if (NOT Protobuf_FOUND)
+        find_package(Protobuf CONFIG QUIET)
+    endif()
+    if (NOT gRPC_FOUND)
+        find_package(gRPC CONFIG QUIET)
+    endif()
+
     find_program(ONIONMIXERCHATMANAGER_PROTOC_EXECUTABLE protoc)
     find_program(ONIONMIXERCHATMANAGER_GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin)
 
+    # 3차: pkg-config (Linux 일부 비표준 환경 — 기존 동작 유지).
     if ((NOT Protobuf_FOUND OR NOT gRPC_FOUND) AND PKG_CONFIG_FOUND)
         pkg_check_modules(ONIONMIXERCHATMANAGER_PROTOBUF_PC QUIET protobuf)
         pkg_check_modules(ONIONMIXERCHATMANAGER_GRPC_PC QUIET grpc++)
