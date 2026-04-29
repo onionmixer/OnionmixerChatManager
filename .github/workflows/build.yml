@@ -20,7 +20,9 @@ jobs:
             build-essential cmake ninja-build git pkg-config \
             qtbase5-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools \
             libqt5network5 libqt5widgets5 libqt5gui5 libqt5core5a \
-            libqt5test5
+            libqt5test5 \
+            libprotobuf-dev libgrpc++-dev \
+            protobuf-compiler protobuf-compiler-grpc
 
       - name: Configure (Release, -Werror enforced)
         run: |
