@@ -2250,7 +2250,7 @@ void MainWindow::syncChzzkProfileFromAccessToken(const QString& accessToken)
         return;
     }
 
-    QNetworkRequest req(QUrl(Chzzk::OpenApi::usersMe()));
+    QNetworkRequest req{QUrl(Chzzk::OpenApi::usersMe())};
     req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(token).toUtf8());
     if (!m_snapshot.chzzk.clientId.trimmed().isEmpty()) {
         req.setRawHeader("Client-Id", m_snapshot.chzzk.clientId.trimmed().toUtf8());

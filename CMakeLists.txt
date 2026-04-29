@@ -5,6 +5,15 @@ project(OnionmixerChatManagerQt5 VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# MSVC — UTF-8 source/exec charset + standard conformance.
+# directory scope (project() 직후) 에서 add_compile_options 호출 → 이후 정의되는 모든
+# 타깃 (메인 앱, 공유 lib, BroadChatClient, 모든 test_*/tst_*) 에 자동 적용.
+# 이유: 본 프로젝트 소스에 한국어 주석/리터럴 다수 — /utf-8 없으면 시스템 codepage(CP949)
+# 으로 해석되어 C4819 warning 다량 + 일부 wide-string 변환 시 데이터 손실 위험.
+if (MSVC)
+    add_compile_options(/utf-8 /W3 /permissive-)
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -233,12 +242,6 @@ if (WIN32)
     set_target_properties(OnionmixerChatManagerQt5 PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
-# MSVC — force UTF-8 source/exec charset (Korean comments + literals) and standard conformance.
-if (MSVC)
-    target_compile_options(onionmixer_chat_shared PRIVATE /utf-8 /W3 /permissive-)
-    target_compile_options(OnionmixerChatManagerQt5 PRIVATE /utf-8 /W3 /permissive-)
-endif()
-
 target_include_directories(OnionmixerChatManagerQt5 PRIVATE
     src
     ${CMAKE_CURRENT_BINARY_DIR}/generated
@@ -316,6 +319,26 @@ if (Qt5Test_FOUND)
     target_link_libraries(test_YouTubeUrlUtils PRIVATE Qt5::Core Qt5::Network Qt5::Test)
     set_target_properties(test_YouTubeUrlUtils PROPERTIES AUTOMOC ON)
     add_test(NAME YouTubeUrlUtils COMMAND test_YouTubeUrlUtils)
+endif()
+
+# ---------------------------------------------------------------------------
+# Windows — ctest 환경: Qt bin 을 PATH 에 prepend (DLL 발견용).
+# windeployqt 는 메인 앱·클라 exe 옆에만 deploy 하므로, build 트리의 test_*/tst_* exe 는
+# 자기 옆에 Qt5Core.dll 이 없어 STATUS_DLL_NOT_FOUND (0xc0000135) 로 실패한다.
+# set_tests_properties 의 directory scope 제약 때문에 메인 디렉토리의 테스트만
+# 여기서 처리. BroadChatClient/test 는 그 디렉토리 내에서 자체 처리한다.
+# Linux 빌드는 무영향 (WIN32 가드).
+# ---------------------------------------------------------------------------
+if (WIN32 AND TARGET Qt5::Core)
+    get_target_property(_oncm_qt_core_loc Qt5::Core LOCATION)
+    if (_oncm_qt_core_loc)
+        get_filename_component(_oncm_qt_bin_dir "${_oncm_qt_core_loc}" DIRECTORY)
+        get_property(_oncm_test_names DIRECTORY PROPERTY TESTS)
+        foreach(_oncm_test ${_oncm_test_names})
+            set_tests_properties(${_oncm_test} PROPERTIES
+                ENVIRONMENT "PATH=${_oncm_qt_bin_dir};$ENV{PATH}")
+        endforeach()
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -428,13 +451,13 @@ if (WIN32)
         DOC "Path to Qt windeployqt tool")
 
     if (ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE)
-        # 메인 앱 + 클라 모두 같은 build output 디렉토리에 DLL/플러그인 폴더 deploy.
-        # 두 타깃 각각에 POST_BUILD 등록 — Ninja Multi-Config 등 출력 디렉토리가 다른
-        # 경우에도 양쪽 모두 deploy 보장.
+        # 메인 앱 windeployqt — 같은 directory 에서 생성된 타깃에만 등록 가능 (CMake 정책).
+        # OnionmixerBroadChatClient 는 BroadChatClient/CMakeLists.txt 안에서 자체 등록.
+        # --debug/--release 명시 안 함: 빈 generator expression 이 "" 빈 인자로 들어가
+        # "\"\" does not exist" 에러를 유발했기 때문. windeployqt 는 PE 헤더에서
+        # Debug/Release 를 자동 감지하므로 미지정이 권장.
         add_custom_command(TARGET OnionmixerChatManagerQt5 POST_BUILD
             COMMAND "${ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE}"
-                $<$<CONFIG:Debug>:--debug>
-                $<$<NOT:$<CONFIG:Debug>>:--release>
                 --no-translations
                 --no-system-d3d-compiler
                 --no-opengl-sw
@@ -443,21 +466,6 @@ if (WIN32)
                 $<TARGET_FILE:OnionmixerChatManagerQt5>
             COMMENT "windeployqt: OnionmixerChatManagerQt5"
             VERBATIM)
-
-        if (TARGET OnionmixerBroadChatClient)
-            add_custom_command(TARGET OnionmixerBroadChatClient POST_BUILD
-                COMMAND "${ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE}"
-                    $<$<CONFIG:Debug>:--debug>
-                    $<$<NOT:$<CONFIG:Debug>>:--release>
-                    --no-translations
-                    --no-system-d3d-compiler
-                    --no-opengl-sw
-                    --no-quick-import
-                    --no-virtualkeyboard
-                    $<TARGET_FILE:OnionmixerBroadChatClient>
-                COMMENT "windeployqt: OnionmixerBroadChatClient"
-                VERBATIM)
-        endif()
     else()
         message(WARNING
             "windeployqt not found — Windows install bundle will be missing Qt runtime DLLs. "

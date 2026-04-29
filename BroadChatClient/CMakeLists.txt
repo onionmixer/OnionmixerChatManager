@@ -79,11 +79,31 @@ if (WIN32)
         resources/app_icon.rc)
     # GUI subsystem (no console window pop-up); WinMain provided by Qt5::WinMain via qtmain.lib.
     set_target_properties(OnionmixerBroadChatClient PROPERTIES WIN32_EXECUTABLE TRUE)
-endif()
 
-# MSVC — UTF-8 source/exec charset + standard conformance (mirrors top-level).
-if (MSVC)
-    target_compile_options(OnionmixerBroadChatClient PRIVATE /utf-8 /W3 /permissive-)
+    # windeployqt POST_BUILD — Qt 런타임 DLL/플러그인 자동 동봉.
+    # add_custom_command(TARGET ...) 는 타깃이 생성된 디렉토리에서만 호출 가능하므로
+    # 여기(BroadChatClient/CMakeLists.txt)에서 등록한다.
+    # find_program 캐시 변수는 최상위 CMakeLists 와 공유 — 이미 캐시되어 있으면 재탐색 안 함.
+    find_program(ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt
+        HINTS "${Qt5_DIR}/../../../bin"
+              "$ENV{QTDIR}/bin"
+        DOC "Path to Qt windeployqt tool")
+
+    if (ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE)
+        # --debug/--release 미지정 — windeployqt 가 PE 헤더 자동 감지.
+        # 빈 generator expression 이 "" 빈 인자로 전달되어 에러 유발하는 사례 회피.
+        add_custom_command(TARGET OnionmixerBroadChatClient POST_BUILD
+            COMMAND "${ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE}"
+                --no-translations
+                --no-system-d3d-compiler
+                --no-opengl-sw
+                --no-quick-import
+                --no-virtualkeyboard
+                $<TARGET_FILE:OnionmixerBroadChatClient>
+            COMMENT "windeployqt: OnionmixerBroadChatClient"
+            VERBATIM)
+    endif()
 endif()
 
 # v71: macOS — .app 번들 생성 시 .icns 를 Resources/ 에 포함하고 Info.plist 참조.

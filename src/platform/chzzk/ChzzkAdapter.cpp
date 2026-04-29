@@ -829,7 +829,7 @@ bool ChzzkAdapter::sendMessage(const QString& text)
         return false;
     }
 
-    QNetworkRequest req(QUrl(Chzzk::OpenApi::chatsSend()));
+    QNetworkRequest req{QUrl(Chzzk::OpenApi::chatsSend())};
     req.setRawHeader("Authorization", QStringLiteral("Bearer %1").arg(m_accessToken).toUtf8());
     if (!m_clientId.isEmpty()) {
         req.setRawHeader("Client-Id", m_clientId.toUtf8());

@@ -121,3 +121,18 @@ target_link_libraries(tst_broadchat_ini_validator PRIVATE
 )
 add_test(NAME BroadChat.IniValidator
          COMMAND tst_broadchat_ini_validator)
+
+# Windows — ctest PATH prepend (Qt bin). set_tests_properties 의 directory scope 제약상
+# 이 디렉토리에서 자체 처리. self-contained — 캐시 변수 의존 없음.
+if (WIN32 AND TARGET Qt5::Core)
+    get_target_property(_oncm_bcc_qt_core_loc Qt5::Core LOCATION)
+    if (_oncm_bcc_qt_core_loc)
+        get_filename_component(_oncm_bcc_qt_bin_dir
+            "${_oncm_bcc_qt_core_loc}" DIRECTORY)
+        get_property(_oncm_bcc_test_names DIRECTORY PROPERTY TESTS)
+        foreach(_oncm_test ${_oncm_bcc_test_names})
+            set_tests_properties(${_oncm_test} PROPERTIES
+                ENVIRONMENT "PATH=${_oncm_bcc_qt_bin_dir};$ENV{PATH}")
+        endforeach()
+    endif()
+endif()
