@@ -247,6 +247,74 @@ channel_name=
 account_label=
 ```
 
+### 4.1 `[broadchat]` 섹션 — 외부 클라이언트(TCP 서버)
+
+`OnionmixerBroadChatClient` 가 접속하는 TCP 서버 동작을 제어합니다. 메인 앱 시작 시 listen 합니다.
+
+| 키 | 기본값 | 설명 |
+|----|--------|------|
+| `enabled` | `true` | BroadChat 서버 활성화 여부 |
+| `tcp_bind` | `127.0.0.1` | listen 인터페이스. **GUI 비노출 — ini 직접 편집만 가능** |
+| `tcp_port` | `47123` | listen 포트 (1024~65535). GUI Configuration → General 에서 변경 가능 |
+| `auth_token` | (빈 값) | 사전 공유 토큰. 빈 값 = 인증 없음. UUID v4 권장 (인쇄 가능 ASCII, 1~128자). GUI Generate/Copy/Clear 지원 |
+| `max_clients` | `10` | 동시 접속 상한 (1~100) |
+| `reject_duplicate_client_id` | `false` | 동일 clientId 중복 접속 차단 여부 |
+| `duplicate_kick_target` | `newest` | 중복 차단 시 종료 대상. `newest` 또는 `oldest` |
+| `trace` | `false` | `broadchat.trace` 로그 카테고리 활성화 |
+
+예시:
+
+```ini
+[broadchat]
+enabled=true
+tcp_bind=127.0.0.1
+tcp_port=47123
+auth_token=
+max_clients=10
+reject_duplicate_client_id=false
+duplicate_kick_target=newest
+trace=false
+```
+
+#### `tcp_bind` 값별 동작
+
+| 값 | listen 범위 | 용도 |
+|----|-------------|------|
+| `127.0.0.1` (기본) | loopback only | **같은 PC** 의 클라이언트만 접속 가능. 가장 안전 |
+| `0.0.0.0` | 모든 인터페이스 (IPv4) | LAN 의 다른 PC, WAN(공인 IP) 모두 도달 가능. **VPN/방화벽 필수** |
+| 특정 LAN IP (예: `192.168.1.10`) | 해당 인터페이스만 | 다중 NIC 환경에서 한 인터페이스만 노출 |
+| `::` | 모든 인터페이스 (IPv6) | IPv6 전용 노출 |
+
+> **증상 — `BroadChatClient` 가 `127.0.0.1` 로는 연결되는데 메인 PC 의 LAN IP 로는 안 됨**: 서버가 `tcp_bind=127.0.0.1` (기본값) 으로 loopback 에만 listen 중입니다. 외부 인터페이스로 도달하려면 아래 절차로 변경하세요.
+
+#### `tcp_bind` 가 GUI 에 노출되지 않는 이유
+
+Configuration 다이얼로그의 BroadChat 섹션은 **포트와 auth_token만** 표시합니다. `tcp_bind` 은 의도적으로 ini 전용입니다 — 클릭 한 번으로 외부 노출되는 사고를 막고, 변경 시 **명시적으로 ini 를 편집**하게 만들어 운영자가 보안 영향(VPN/방화벽/인증 토큰)을 함께 검토하도록 강제합니다.
+
+#### 외부 노출 절차 (LAN 의 다른 PC 에서 접속)
+
+1. 메인 앱에서 Configuration → General → BroadChat → **Generate** 로 `auth_token` 발급 → **Apply** → 앱 종료
+2. `app.ini` 를 텍스트 에디터로 열어 `[broadchat]` 의 `tcp_bind=0.0.0.0` (또는 특정 LAN IP) 로 수정
+3. 메인 앱 재시작
+4. listen 검증:
+   ```bash
+   # Linux
+   ss -ltn | grep 47123        # 0.0.0.0:47123 이어야 정상
+   # Windows (PowerShell)
+   Get-NetTCPConnection -LocalPort 47123 -State Listen
+   ```
+5. `OnionmixerBroadChatClient` 의 우클릭 → 세팅에서 **Host** 에 서버 PC 의 LAN IP, **Port** 47123, **Auth Token** 에 위에서 발급한 동일 값 입력
+
+#### 보안 가드
+
+- `tcp_bind=0.0.0.0` 인데 `auth_token` 이 비어 있는 상태로 Apply 하면 Configuration 다이얼로그가 modal 보안 경고로 차단합니다 (`src/ui/ConfigurationDialog.cpp:635`).
+- 잘못된 IP / 호스트 이름 / IPv6 주소 → 로드 시 자동으로 `127.0.0.1` 로 fallback (경고 로그 출력).
+- `app.ini` 파일은 저장 시 권한 `0600` (Linux) 으로 자동 설정됩니다.
+
+#### WAN 노출은 권장하지 않음
+
+프로토콜은 **평문 TCP** 이며 TLS 는 도입하지 않습니다 (영구 정책). 공인 IP 로 직접 노출하지 말고 **WireGuard/Tailscale 등 VPN 터널**로 LAN 처럼 묶어서 사용하세요. 자세한 내용은 [VPN 가이드](docs/vpn-guide.md) 와 [트러블슈팅](docs/troubleshooting.md).
+
 ## 5. 초기 사용 흐름
 
 1. 앱 실행
