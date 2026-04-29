@@ -168,23 +168,84 @@ if ($LASTEXITCODE -ne 0) { Write-Err "빌드 실패"; exit $LASTEXITCODE }
 Write-Ok "빌드 완료"
 
 # ---------------------------------------------------------------------------
-# CPack (NSIS, component-based — server·client 두 인스톨러 생성)
+# CPack (NSIS) — Linux .deb 정책의 의도 매핑.
+#
+# Linux 측은 CPack DEB generator 가 CPACK_DEB_COMPONENT_INSTALL=ON +
+# COMPONENTS_GROUPING=IGNORE 조합으로 단일 cpack 호출에서 컴포넌트마다 별도
+# .deb 를 자동 산출. NSIS generator 는 이 자동화를 지원하지 않고 IGNORE 를
+# silent 로 ONE_PER_GROUP 처리 → 단일 인스톨러로 합쳐짐.
+#
+# Linux 의 의도 (server/client 두 산출물) 를 재현하기 위해 cpack 을 두 번
+# 호출하고 -D 로 컴포넌트·파일명·표시명·설치디렉토리를 override. cmake build
+# 는 한 번 (Linux 와 동일).
+#
+# 산출 매핑 (PLAN_COMPILE_WINDOWS.md §3.5.2):
+#   onionmixerchatmanagerqt5-<ver>-win64.exe   ↔ onionmixerchatmanagerqt5_*.deb
+#       components: server + client (방송 PC: 메인앱 + 클라 모두)
+#   onionmixerbroadchatclient-<ver>-win64.exe  ↔ onionmixerbroadchatclient_*.deb
+#       components: client only (렌더링 PC: 클라 단독)
 # ---------------------------------------------------------------------------
 if ($NoPackage) {
     Write-Info "-NoPackage 지정 — 패키징 단계 건너뜀."
     exit 0
 }
 
-Write-Info "cpack -G NSIS..."
+# CMakeCache 에서 PROJECT_VERSION 추출 (CPack 의 CPACK_PACKAGE_VERSION 변수와 동일값).
+$ProjectVersion = "0.1.0"
+$cacheFile = Join-Path $BuildDir "CMakeCache.txt"
+if (Test-Path $cacheFile) {
+    $verLine = Get-Content $cacheFile | Where-Object { $_ -match "^CMAKE_PROJECT_VERSION:STATIC=" } | Select-Object -First 1
+    if ($verLine) {
+        $ProjectVersion = ($verLine -split "=", 2)[1].Trim()
+    }
+}
+Write-Info "패키지 버전: $ProjectVersion"
+
+function Invoke-CpackProfile {
+    param(
+        [Parameter(Mandatory)][string]$Components,
+        [Parameter(Mandatory)][string]$FileName,
+        [Parameter(Mandatory)][string]$DisplayName,
+        [Parameter(Mandatory)][string]$InstallDir,
+        [Parameter(Mandatory)][string]$Executables
+    )
+    Write-Info "cpack profile: $FileName.exe  (components=$Components)"
+    & cpack -G NSIS -C $Config `
+        "-DCPACK_COMPONENTS_ALL=$Components" `
+        "-DCPACK_PACKAGE_FILE_NAME=$FileName" `
+        "-DCPACK_NSIS_DISPLAY_NAME=$DisplayName" `
+        "-DCPACK_NSIS_PACKAGE_NAME=$DisplayName" `
+        "-DCPACK_PACKAGE_INSTALL_DIRECTORY=$InstallDir" `
+        "-DCPACK_PACKAGE_EXECUTABLES=$Executables"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "cpack ($FileName) 실패 exit=$LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
+    Write-Ok "산출: $FileName.exe"
+}
+
 Push-Location $BuildDir
 try {
-    Get-ChildItem -Path . -Filter "*.exe" |
-        Where-Object { $_.Name -match "^onionmixer.*\.exe$" } |
+    # 이전 cpack 산출 정리 — 정확한 패턴(<name>-<ver>-win64.exe)으로만 매치
+    # → build 산출물 (OnionmixerChatManagerQt5.exe 등) 미매치 보장.
+    Get-ChildItem -Path . -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
-    & cpack -G NSIS -C $Config
-    if ($LASTEXITCODE -ne 0) { Write-Err "cpack 실패"; exit $LASTEXITCODE }
-    Write-Ok "cpack 완료"
+    # ── Server 인스톨러 (server + client 컴포넌트 동봉, Linux server .deb 등가) ──
+    Invoke-CpackProfile `
+        -Components "server;client" `
+        -FileName "onionmixerchatmanagerqt5-$ProjectVersion-win64" `
+        -DisplayName "Onionmixer Chat Manager" `
+        -InstallDir "OnionmixerChatManager" `
+        -Executables "OnionmixerChatManagerQt5;Onionmixer Chat Manager;OnionmixerBroadChatClient;BroadChat Client"
+
+    # ── Client 인스톨러 (client 컴포넌트 단독, Linux client .deb 등가) ──
+    Invoke-CpackProfile `
+        -Components "client" `
+        -FileName "onionmixerbroadchatclient-$ProjectVersion-win64" `
+        -DisplayName "Onionmixer BroadChat Client" `
+        -InstallDir "OnionmixerBroadChatClient" `
+        -Executables "OnionmixerBroadChatClient;Onionmixer BroadChat Client"
 } finally {
     Pop-Location
 }
@@ -195,7 +256,7 @@ try {
 Write-Host ""
 Write-Host "=== 생성된 패키지 ===" -ForegroundColor Cyan
 
-$Installers = Get-ChildItem -Path $BuildDir -Filter "onionmixer*.exe" -ErrorAction SilentlyContinue
+$Installers = Get-ChildItem -Path $BuildDir -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue
 if (-not $Installers) {
     Write-Err "생성된 NSIS 인스톨러가 없습니다. cpack 출력 확인."
     exit 1

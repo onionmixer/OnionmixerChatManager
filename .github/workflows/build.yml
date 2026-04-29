@@ -85,6 +85,40 @@ jobs:
       - name: Run unit tests
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Package NSIS installers (server + client per Linux .deb policy)
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
+          cd build
+
+          # Server 인스톨러 — server + client 컴포넌트 동봉 (방송 PC).
+          # Linux 의 onionmixerchatmanagerqt5_*.deb 등가.
+          cpack -G NSIS -C Release `
+            "-DCPACK_COMPONENTS_ALL=server;client" `
+            "-DCPACK_PACKAGE_FILE_NAME=onionmixerchatmanagerqt5-0.1.0-win64" `
+            "-DCPACK_NSIS_DISPLAY_NAME=Onionmixer Chat Manager" `
+            "-DCPACK_NSIS_PACKAGE_NAME=Onionmixer Chat Manager" `
+            "-DCPACK_PACKAGE_INSTALL_DIRECTORY=OnionmixerChatManager" `
+            "-DCPACK_PACKAGE_EXECUTABLES=OnionmixerChatManagerQt5;Onionmixer Chat Manager;OnionmixerBroadChatClient;BroadChat Client"
+
+          # Client 인스톨러 — client 컴포넌트 단독 (렌더링 PC).
+          # Linux 의 onionmixerbroadchatclient_*.deb 등가.
+          cpack -G NSIS -C Release `
+            "-DCPACK_COMPONENTS_ALL=client" `
+            "-DCPACK_PACKAGE_FILE_NAME=onionmixerbroadchatclient-0.1.0-win64" `
+            "-DCPACK_NSIS_DISPLAY_NAME=Onionmixer BroadChat Client" `
+            "-DCPACK_NSIS_PACKAGE_NAME=Onionmixer BroadChat Client" `
+            "-DCPACK_PACKAGE_INSTALL_DIRECTORY=OnionmixerBroadChatClient" `
+            "-DCPACK_PACKAGE_EXECUTABLES=OnionmixerBroadChatClient;Onionmixer BroadChat Client"
+
+      - name: Upload NSIS installers
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsis-installers-windows
+          path: build/onionmixer*-*-win64.exe
+          retention-days: 14
+
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
