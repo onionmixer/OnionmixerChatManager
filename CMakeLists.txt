@@ -502,6 +502,30 @@ if (WIN32)
             COMPONENT client
             OPTIONAL)
     endforeach()
+
+    # ---------------------------------------------------------------------------
+    # PR5d — vcpkg gRPC/protobuf/openssl 런타임 DLL 을 NSIS 인스톨러에 동봉.
+    # windeployqt 는 Qt 만 알므로, vcpkg 가 빌드한 streamList 의존성 DLL 들은
+    # 별도 install 필요. AVAILABLE=ON (vcpkg toolchain + 의존성 발견됨) 인 경우만.
+    # streamList=OFF 빌드 (PR1–4 default) 에서는 진입 안 함 → 회귀 무영향.
+    #
+    # 메인 앱 디렉토리에서 가져오는 이유: cmake configure 가 vcpkg toolchain 을
+    # 통해 IMPORTED target 의 RUNTIME location 을 설정하면, 빌드 시 cmake 가
+    # DLL 을 해당 빌드 디렉토리에 자동 복사한다.
+    # client 컴포넌트에 두는 이유: server 인스톨러는 server→client deps 로 자동
+    # 포함, 클라 단독 인스톨러도 자체 동작 보장. Qt DLL 정책과 일치.
+    #
+    # regex 의 DLL 이름은 vcpkg 버전·triplet 에 따라 변동 가능 — 첫 빌드 후
+    # 누락 발견되면 패턴 보강. 현 패턴은 grpc 1.60+ + protobuf 25+ + OpenSSL 3
+    # 가정. 누락 DLL 은 실행 시 0xc0000135 로 즉시 드러남.
+    # ---------------------------------------------------------------------------
+    if (ONIONMIXERCHATMANAGER_YT_STREAMLIST_AVAILABLE)
+        install(DIRECTORY "$<TARGET_FILE_DIR:OnionmixerChatManagerQt5>/"
+            DESTINATION bin
+            COMPONENT client
+            FILES_MATCHING
+                REGEX "(libprotobuf.*\\.dll|libprotoc.*\\.dll|grpc.*\\.dll|gpr.*\\.dll|address_sorting\\.dll|upb.*\\.dll|abseil_dll\\.dll|absl_.*\\.dll|cares\\.dll|re2\\.dll|zlib1\\.dll|libcrypto-3-x64\\.dll|libssl-3-x64\\.dll|libssl-1_1-x64\\.dll|libcrypto-1_1-x64\\.dll)$")
+    endif()
 endif()
 
 # CPack 공통
