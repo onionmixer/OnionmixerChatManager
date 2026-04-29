@@ -64,10 +64,17 @@ ctest --test-dir build --output-on-failure
 스크립트 빌드 (PowerShell):
 
 ```powershell
-.\scripts\package-windows.ps1                      # 빌드 + NSIS 인스톨러 생성
+.\scripts\package-windows.ps1                      # 빌드 + NSIS 인스톨러 (streamList=OFF, 기본)
 .\scripts\package-windows.ps1 -Clean               # build-win\ 삭제 후 처음부터
 .\scripts\package-windows.ps1 -NoPackage           # 빌드만 (NSIS 미설치 환경)
 .\scripts\package-windows.ps1 -QtRoot "D:\Qt\5.15.2\msvc2019_64"
+
+# YouTube streamList (gRPC stream) 활성화 — vcpkg 부트스트랩 필요. 첫 빌드 30분+
+.\scripts\package-windows.ps1 -VcpkgRoot "C:\dev\vcpkg"
+# 또는 환경변수로 미리 설정:
+$env:VCPKG_ROOT = "C:\dev\vcpkg"
+.\scripts\package-windows.ps1                      # VCPKG_ROOT 인식 시 streamList 자동 ON
+.\scripts\package-windows.ps1 -NoStreamList        # vcpkg 활성 환경에서도 OFF 강제
 ```
 
 수동 빌드:

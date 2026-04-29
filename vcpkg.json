@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "onionmixerchatmanager",
+  "version-string": "0.1.0",
+  "description": "Windows-only vcpkg dependencies for YouTube streamList (gRPC). Linux uses apt packages (libprotobuf-dev, libgrpc++-dev) and ignores this manifest.",
+  "homepage": "https://github.com/onionmixer/OnionmixerChatManager",
+  "dependencies": [
+    {
+      "name": "protobuf",
+      "platform": "windows"
+    },
+    {
+      "name": "grpc",
+      "platform": "windows"
+    }
+  ]
+}

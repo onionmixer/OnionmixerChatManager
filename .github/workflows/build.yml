@@ -49,7 +49,9 @@ jobs:
 
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 40
+    # 첫 회: vcpkg cache miss 시 grpc/protobuf source 빌드로 30분+ 소요.
+    # 두번째 회 이후: GitHub Actions cache hit 으로 < 5분.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -61,15 +63,21 @@ jobs:
           modules: 'qtwebsockets'
           cache: true
 
-      - name: Configure (Release, no streamList)
+      - name: Setup vcpkg (manifest mode + binary cache)
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Configure (Release, streamList=ON via vcpkg)
         shell: pwsh
         run: |
           cmake -S . -B build `
             -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DCMAKE_BUILD_TYPE=Release `
             -DBUILD_TESTING=ON `
-            -DONIONMIXERCHATMANAGER_BUILD_BROADCHATCLIENT=ON `
-            -DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF
+            -DONIONMIXERCHATMANAGER_BUILD_BROADCHATCLIENT=ON
 
       - name: Build all targets
         run: cmake --build build --config Release --parallel

@@ -22,12 +22,18 @@
 [CmdletBinding()]
 param(
     [switch]$Clean,
-    [switch]$Verbose,
     [switch]$NoPackage,
     [string]$QtRoot,
     [string]$Generator = "Visual Studio 17 2022",
     [string]$Arch = "x64",
-    [string]$Config = "Release"
+    [string]$Config = "Release",
+    # vcpkg root (예: C:\dev\vcpkg). 미지정 시 $env:VCPKG_ROOT 사용.
+    # 둘 다 비어 있으면 streamList=OFF 로 빌드 (PR1–4 의 기본 동작).
+    # vcpkg 활성화 시 vcpkg.json manifest 의 protobuf/grpc 자동 install →
+    # YouTube streamList (gRPC stream) 빌드 활성화. 첫 빌드 30분+ 소요.
+    [string]$VcpkgRoot = $env:VCPKG_ROOT,
+    # 명시적으로 streamList 를 OFF 로 강제 (vcpkg 활성 환경에서도).
+    [switch]$NoStreamList
 )
 
 $ErrorActionPreference = "Stop"
@@ -114,12 +120,37 @@ $ConfigureArgs = @(
     "-DCMAKE_PREFIX_PATH=$QtRoot",
     "-DCMAKE_BUILD_TYPE=$Config",
     "-DBUILD_TESTING=ON",
-    "-DONIONMIXERCHATMANAGER_BUILD_BROADCHATCLIENT=ON",
-    # protobuf/gRPC 는 vcpkg 통합 후 별도 단계에서 활성화 — 1차는 OFF.
-    "-DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF"
+    "-DONIONMIXERCHATMANAGER_BUILD_BROADCHATCLIENT=ON"
 )
 
-if ($Verbose) {
+# ---------------------------------------------------------------------------
+# vcpkg 통합 (PR5c) — VCPKG_ROOT 또는 -VcpkgRoot 지정 시 streamList=ON.
+# 미지정 또는 -NoStreamList 시 streamList=OFF (PR1–4 기본 동작).
+# ---------------------------------------------------------------------------
+$useVcpkg = $false
+if ($VcpkgRoot -and -not $NoStreamList) {
+    $vcpkgToolchain = Join-Path $VcpkgRoot "scripts\buildsystems\vcpkg.cmake"
+    if (Test-Path $vcpkgToolchain) {
+        $ConfigureArgs += "-DCMAKE_TOOLCHAIN_FILE=$vcpkgToolchain"
+        $ConfigureArgs += "-DVCPKG_TARGET_TRIPLET=x64-windows"
+        $useVcpkg = $true
+        Write-Ok "vcpkg: $VcpkgRoot — streamList=ON (vcpkg.json manifest 자동 install)"
+    } else {
+        Write-Warn "VcpkgRoot 지정되었지만 toolchain 미발견: $vcpkgToolchain"
+        Write-Warn "  → streamList=OFF 로 진행 (vcpkg 부트스트랩 필요: bootstrap-vcpkg.bat)"
+        $ConfigureArgs += "-DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF"
+    }
+} else {
+    if ($NoStreamList) {
+        Write-Info "streamList=OFF (--NoStreamList 명시)"
+    } else {
+        Write-Info "streamList=OFF (VCPKG_ROOT 또는 -VcpkgRoot 미지정)"
+    }
+    $ConfigureArgs += "-DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF"
+}
+
+# PowerShell common parameter -Verbose 는 $VerbosePreference 으로 평가.
+if ($VerbosePreference -ne 'SilentlyContinue') {
     & cmake @ConfigureArgs
 } else {
     & cmake @ConfigureArgs | Out-Null
@@ -132,11 +163,7 @@ Write-Ok "configure 완료"
 # ---------------------------------------------------------------------------
 Write-Info "빌드 시작 ($Config, parallel)..."
 $BuildArgs = @("--build", $BuildDir, "--config", $Config, "--parallel")
-if ($Verbose) {
-    & cmake @BuildArgs
-} else {
-    & cmake @BuildArgs
-}
+& cmake @BuildArgs
 if ($LASTEXITCODE -ne 0) { Write-Err "빌드 실패"; exit $LASTEXITCODE }
 Write-Ok "빌드 완료"
 
