@@ -490,13 +490,24 @@ if (WIN32)
     # 이유: server 인스톨러는 `CPACK_COMPONENT_SERVER_DEPENDS client` 로 client 를 자동 포함.
     # 결과적으로 server·client 어느 인스톨러로 설치해도 Qt DLL 이 동봉되며, client 단독
     # 인스톨러도 자체 동작 가능 (Linux .deb 의 클라 독립 정책 보존).
+    #
+    # FILES_MATCHING REGEX 는 "파일" 만 필터링하고 디렉토리 트래버설은 막지 않으므로,
+    # 빌드 산출 디렉토리(CMakeFiles, *_autogen, generated, test 등)가 빈 디렉토리로
+    # 설치 트리에 새어 들어간다. PATTERN ... EXCLUDE 로 트래버설 자체를 차단해야
+    # 인스톨러가 깨끗해진다.
     install(DIRECTORY "$<TARGET_FILE_DIR:OnionmixerBroadChatClient>/"
         DESTINATION bin
         COMPONENT client
         FILES_MATCHING
+            PATTERN "CMakeFiles" EXCLUDE
+            PATTERN "*_autogen" EXCLUDE
+            PATTERN "*.dir" EXCLUDE
+            PATTERN "generated" EXCLUDE
+            PATTERN "test" EXCLUDE
+            PATTERN "Testing" EXCLUDE
             REGEX "(Qt5[A-Za-z0-9]*\\.dll|libEGL\\.dll|libGLESv2\\.dll|d3dcompiler.*\\.dll|opengl32sw\\.dll|vc_redist.*\\.exe)$")
 
-    foreach(_oncm_qt_plugin_dir platforms imageformats iconengines styles tls)
+    foreach(_oncm_qt_plugin_dir platforms imageformats iconengines styles tls translations)
         install(DIRECTORY "$<TARGET_FILE_DIR:OnionmixerBroadChatClient>/${_oncm_qt_plugin_dir}"
             DESTINATION bin
             COMPONENT client
@@ -540,6 +551,14 @@ if (WIN32)
             FILES_MATCHING
                 PATTERN "_CPack_Packages" EXCLUDE
                 PATTERN "vcpkg_installed" EXCLUDE
+                PATTERN "NSISBUILD" EXCLUDE
+                PATTERN "CMakeFiles" EXCLUDE
+                PATTERN "*_autogen" EXCLUDE
+                PATTERN "*.dir" EXCLUDE
+                PATTERN "generated" EXCLUDE
+                PATTERN "test" EXCLUDE
+                PATTERN "Testing" EXCLUDE
+                PATTERN "BroadChatClient" EXCLUDE
                 REGEX "(libprotobuf.*\\.dll|libprotoc.*\\.dll|grpc.*\\.dll|gpr.*\\.dll|address_sorting\\.dll|upb.*\\.dll|abseil_dll\\.dll|absl_.*\\.dll|cares\\.dll|re2\\.dll|/z\\.dll|zlib1?\\.dll|libcrypto-3-x64\\.dll|libssl-3-x64\\.dll|libssl-1_1-x64\\.dll|libcrypto-1_1-x64\\.dll)$")
     endif()
 endif()

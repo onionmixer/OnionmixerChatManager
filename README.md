@@ -56,10 +56,13 @@ ctest --test-dir build --output-on-failure
 세부 절차·검증 체크리스트는 `PLAN_COMPILE_WINDOWS.md` 참조.
 
 권장 조합:
-- Visual Studio 2022 (Desktop development with C++)
+- Visual Studio 2022 (17) 또는 2026 (18) — Desktop development with C++ 워크로드
+  - 패키지 스크립트는 `vswhere`로 설치된 VS 메이저 버전을 자동 감지해 매칭되는 CMake generator를 선택 (VS 15/16/17/18 지원).
+  - **Ninja·MinGW 등 비-VS generator는 미지원** — MSBuild/VS generator 가 패키징·windeployqt 정합성 보장.
 - Qt 5.15.2 MSVC 2019 64-bit (`C:\Qt\5.15.2\msvc2019_64`)
-- CMake 3.16+
+- CMake 3.16+ (CMake 4.x 도 호환)
 - NSIS (`choco install nsis` — 패키징 시점에만 필요)
+- Windows SDK (Visual Studio Installer 의 "Desktop development with C++" 에 포함). `Lib`·`Include` 가 `C:\Program Files (x86)\Windows Kits\10\` 아래에 정상 설치되어 있어야 함 (§2.2.1 트러블슈팅 참조).
 - vcpkg (선택 — YouTube `streamList` 활성화 시; `git clone https://github.com/microsoft/vcpkg && bootstrap-vcpkg.bat`)
 
 스크립트 빌드 (PowerShell):
@@ -69,6 +72,7 @@ ctest --test-dir build --output-on-failure
 .\scripts\package-windows.ps1 -Clean               # build-win\ 삭제 후 처음부터
 .\scripts\package-windows.ps1 -NoPackage           # 빌드만 (NSIS 미설치 환경)
 .\scripts\package-windows.ps1 -QtRoot "D:\Qt\5.15.2\msvc2019_64"
+.\scripts\package-windows.ps1 -Generator "Visual Studio 17 2022"  # 자동 감지 override
 
 # YouTube streamList (gRPC stream) 활성화 — vcpkg 부트스트랩 필요. 첫 빌드 30분+
 .\scripts\package-windows.ps1 -VcpkgRoot "C:\dev\vcpkg"
@@ -78,11 +82,24 @@ $env:VCPKG_ROOT = "C:\dev\vcpkg"
 .\scripts\package-windows.ps1 -NoStreamList        # vcpkg 활성 환경에서도 OFF 강제
 ```
 
-수동 빌드:
+스크립트는 Developer Command Prompt 가 아닌 일반 PowerShell 에서도 실행되도록 내부에서 Qt·VS·NSIS 경로를 해석하지만, MSBuild 가 `cl.exe`/`link.exe` 를 호출할 수 있으려면 환경변수 (`PATH`, `LIB`, `INCLUDE`) 가 설정돼 있어야 한다. 가장 안전한 호출 방식:
 
 ```powershell
-# 기본 — streamList=OFF (vcpkg 미사용)
+# Developer Command Prompt 또는 vcvars64 prepend
+cmd /c '"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" && powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1'
+```
+
+수동 빌드 (Generator 이름은 설치된 VS 에 맞춰 선택):
+
+```powershell
+# 기본 — streamList=OFF (vcpkg 미사용). VS 17 (2022) 기준
 cmake -S . -B build-win -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_PREFIX_PATH="C:\Qt\5.15.2\msvc2019_64" `
+      -DCMAKE_BUILD_TYPE=Release `
+      -DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF
+
+# VS 18 (2026) 가 설치된 경우
+cmake -S . -B build-win -G "Visual Studio 18 2026" -A x64 `
       -DCMAKE_PREFIX_PATH="C:\Qt\5.15.2\msvc2019_64" `
       -DCMAKE_BUILD_TYPE=Release `
       -DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF
@@ -98,14 +115,32 @@ cmake --build build-win --config Release --parallel
 ctest --test-dir build-win -C Release --output-on-failure
 ```
 
-빌드 산출물 (multi-config generator — VS 17 2022 기준, Release 폴더 안에 위치):
+빌드 산출물 (multi-config generator — Release 폴더 안에 위치):
 - `build-win\Release\OnionmixerChatManagerQt5.exe` (메인 앱, GUI subsystem)
 - `build-win\BroadChatClient\Release\OnionmixerBroadChatClient.exe` (오버레이 클라)
 - `build-win\Release\Qt5*.dll`, `platforms\`, `imageformats\`, ... (windeployqt 산출)
 - `build-win\NSISBUILD\onionmixerchatmanagerqt5-0.1.0-win64.exe` (서버+클라 인스톨러)
 - `build-win\NSISBUILD\onionmixerbroadchatclient-0.1.0-win64.exe` (클라 단독 인스톨러)
 
-> Ninja generator 사용 시 (single-config): `Release\` sub-디렉토리 없이 `build-win\` 직접에 .exe 와 .dll 산출.
+#### 2.2.1 트러블슈팅 — `LNK1104: 'ucrtd.lib' 파일을 열 수 없습니다`
+
+CMake configure 가 `No CMAKE_CXX_COMPILER could be found` 로 실패하고 상세 로그(`build-win/CMakeFiles/CMakeConfigureLog.yaml`) 에 위 LNK 오류가 보이면 Windows SDK 의 64-bit 레지스트리 등록이 깨진 상태이다. 64-bit MSBuild 가 빈 경로 `C:\Program Files\Windows Kits\10\` 를 SDK 루트로 잘못 해석해 `ucrtd.lib` 을 못 찾는다.
+
+진단:
+
+```powershell
+# 32-bit 와 64-bit 레지스트리 KitsRoot10 비교 — 두 값이 일치해야 정상
+(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots" -Name KitsRoot10).KitsRoot10
+(Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots" -Name KitsRoot10).KitsRoot10
+```
+
+수정 (관리자 권한):
+
+```cmd
+reg add "HKLM\SOFTWARE\Microsoft\Windows Kits\Installed Roots" /v KitsRoot10 /t REG_SZ /d "C:\Program Files (x86)\Windows Kits\10\" /f
+```
+
+또는 Visual Studio Installer → Modify → Windows SDK 항목 재설치로도 정합성 복원 가능.
 
 YouTube `streamList` (gRPC stream 기반 채팅 수신 경로) 빌드:
 - **default**: streamList=OFF — InnerTube WebChat 폴링만으로 채팅 수신 (Linux/Windows 동일).

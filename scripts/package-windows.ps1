@@ -24,7 +24,9 @@ param(
     [switch]$Clean,
     [switch]$NoPackage,
     [string]$QtRoot,
-    [string]$Generator = "Visual Studio 17 2022",
+    # 빈 값이면 vswhere 로 설치된 VS 의 메이저 버전을 감지해 일치하는 generator 사용.
+    # 명시 가능하지만 Ninja 등 비-VS generator 는 본 프로젝트에서 미지원 (아래 검증).
+    [string]$Generator = "",
     [string]$Arch = "x64",
     [string]$Config = "Release",
     # vcpkg root (예: C:\dev\vcpkg). 미지정 시 $env:VCPKG_ROOT 사용.
@@ -78,6 +80,40 @@ if (-not $QtRoot -or -not (Test-Path (Join-Path $QtRoot "bin\qmake.exe"))) {
     exit 1
 }
 Write-Ok "Qt 경로: $QtRoot"
+
+# ---------------------------------------------------------------------------
+# Generator 결정 — vswhere 로 설치된 VS 의 메이저 버전을 감지해 매칭되는 CMake
+# generator 이름 사용. 본 프로젝트는 Ninja/MinGW 미지원 — 반드시 VS 계열.
+# ---------------------------------------------------------------------------
+function Get-DefaultVSGenerator {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswhere)) { return $null }
+    $ver = & $vswhere -latest -property installationVersion 2>$null
+    if (-not $ver) { return $null }
+    $major = [int]($ver.Split('.')[0])
+    switch ($major) {
+        18 { return "Visual Studio 18 2026" }
+        17 { return "Visual Studio 17 2022" }
+        16 { return "Visual Studio 16 2019" }
+        15 { return "Visual Studio 15 2017" }
+        default { return $null }
+    }
+}
+
+if (-not $Generator) {
+    $Generator = Get-DefaultVSGenerator
+    if (-not $Generator) {
+        Write-Err "설치된 Visual Studio 를 vswhere 로 감지하지 못했습니다. -Generator 'Visual Studio 17 2022' 등으로 명시 필요."
+        exit 1
+    }
+    Write-Ok "Generator 자동 감지: $Generator"
+}
+
+if (-not ($Generator -like "Visual Studio*")) {
+    Write-Err "지원되지 않는 generator: '$Generator'. 본 프로젝트는 Visual Studio (MSBuild) 만 지원합니다."
+    Write-Err "  Ninja/MinGW 등 다른 generator 는 사용하지 마십시오."
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # 사전 도구 점검
@@ -240,6 +276,13 @@ try {
     # 이전 NSIS 산출 정리 — NSISBUILD/ 안의 파일만 제거 (build 산출물 영향 0).
     Get-ChildItem -Path $NsisOutDir -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # cpack staging 디렉토리(_CPack_Packages/) 도 정리해 hermetic 패키징 보장.
+    # 이전 cpack 호출이 잔여 디렉토리를 두면 다음 install 트리에 옛 산출물이 섞일 수 있다.
+    $cpackStaging = Join-Path $NsisOutDir "_CPack_Packages"
+    if (Test-Path $cpackStaging) {
+        Remove-Item -Recurse -Force $cpackStaging -ErrorAction SilentlyContinue
+    }
 
     # ── Server 인스톨러 (server + client 컴포넌트 동봉, Linux server .deb 등가) ──
     Invoke-CpackProfile `
