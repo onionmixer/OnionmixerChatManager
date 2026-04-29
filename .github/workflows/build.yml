@@ -17,7 +17,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build git pkg-config \
+            build-essential cmake git pkg-config \
             qtbase5-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools \
             libqt5network5 libqt5widgets5 libqt5gui5 libqt5core5a \
             libqt5test5 \
@@ -26,7 +26,7 @@ jobs:
 
       - name: Configure (Release, -Werror enforced)
         run: |
-          cmake -S . -B build -G Ninja \
+          cmake -S . -B build -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=ON \
             -DONIONMIXERCHATMANAGER_BUILD_BROADCHATCLIENT=ON

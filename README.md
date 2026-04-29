@@ -29,12 +29,14 @@ Qt5 기반 YouTube + NAVER CHZZK 통합 채팅/운영 도구입니다.
 
 ### 2.1 Linux
 
-기본 빌드:
+기본 빌드 (Unix Makefiles 명시 — Ninja 미설치 환경에서도 안정 동작 보장):
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -G "Unix Makefiles"
 cmake --build build -j4
 ```
+
+> Generator 를 명시하지 않으면 Linux 의 CMake default 가 Unix Makefiles 이지만, 환경변수 `CMAKE_GENERATOR` 또는 `~/.cmake/` 설정이 우선되어 의도치 않게 Ninja 가 선택될 수 있다. 본 프로젝트는 Linux 빌드에 Unix Makefiles 만 검증·지원하므로 generator 를 명시 권장.
 
 실행:
 
