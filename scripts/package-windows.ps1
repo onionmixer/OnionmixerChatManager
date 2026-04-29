@@ -201,13 +201,23 @@ if (Test-Path $cacheFile) {
 }
 Write-Info "패키지 버전: $ProjectVersion"
 
+# NSIS 산출 디렉토리 — build-win\NSISBUILD\ 으로 분리.
+# 빌드 산출물 (.exe, .dll, .lib, .obj 등) 과 패키지 산출물을 같은 디렉토리에
+# 두면 정리 정책이 충돌 (예: 이전에 onionmixer*.exe 패턴이 build 산출물도
+# 매치해서 삭제). NSISBUILD/ 로 분리하면 패키지 산출물만 안전하게 관리.
+# build-win/ 가 .gitignore 매치라 NSISBUILD 도 자동 ignore.
+$NsisOutDir = Join-Path $BuildDir "NSISBUILD"
+New-Item -Path $NsisOutDir -ItemType Directory -Force | Out-Null
+Write-Info "NSIS 산출 디렉토리: $NsisOutDir"
+
 function Invoke-CpackProfile {
     param(
         [Parameter(Mandatory)][string]$Components,
         [Parameter(Mandatory)][string]$FileName,
         [Parameter(Mandatory)][string]$DisplayName,
         [Parameter(Mandatory)][string]$InstallDir,
-        [Parameter(Mandatory)][string]$Executables
+        [Parameter(Mandatory)][string]$Executables,
+        [Parameter(Mandatory)][string]$PackageDirectory
     )
     Write-Info "cpack profile: $FileName.exe  (components=$Components)"
     & cpack -G NSIS -C $Config `
@@ -216,7 +226,8 @@ function Invoke-CpackProfile {
         "-DCPACK_NSIS_DISPLAY_NAME=$DisplayName" `
         "-DCPACK_NSIS_PACKAGE_NAME=$DisplayName" `
         "-DCPACK_PACKAGE_INSTALL_DIRECTORY=$InstallDir" `
-        "-DCPACK_PACKAGE_EXECUTABLES=$Executables"
+        "-DCPACK_PACKAGE_EXECUTABLES=$Executables" `
+        "-DCPACK_PACKAGE_DIRECTORY=$PackageDirectory"
     if ($LASTEXITCODE -ne 0) {
         Write-Err "cpack ($FileName) 실패 exit=$LASTEXITCODE"
         exit $LASTEXITCODE
@@ -226,9 +237,8 @@ function Invoke-CpackProfile {
 
 Push-Location $BuildDir
 try {
-    # 이전 cpack 산출 정리 — 정확한 패턴(<name>-<ver>-win64.exe)으로만 매치
-    # → build 산출물 (OnionmixerChatManagerQt5.exe 등) 미매치 보장.
-    Get-ChildItem -Path . -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue |
+    # 이전 NSIS 산출 정리 — NSISBUILD/ 안의 파일만 제거 (build 산출물 영향 0).
+    Get-ChildItem -Path $NsisOutDir -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
     # ── Server 인스톨러 (server + client 컴포넌트 동봉, Linux server .deb 등가) ──
@@ -237,7 +247,8 @@ try {
         -FileName "onionmixerchatmanagerqt5-$ProjectVersion-win64" `
         -DisplayName "Onionmixer Chat Manager" `
         -InstallDir "OnionmixerChatManager" `
-        -Executables "OnionmixerChatManagerQt5;Onionmixer Chat Manager;OnionmixerBroadChatClient;BroadChat Client"
+        -Executables "OnionmixerChatManagerQt5;Onionmixer Chat Manager;OnionmixerBroadChatClient;BroadChat Client" `
+        -PackageDirectory $NsisOutDir
 
     # ── Client 인스톨러 (client 컴포넌트 단독, Linux client .deb 등가) ──
     Invoke-CpackProfile `
@@ -245,7 +256,8 @@ try {
         -FileName "onionmixerbroadchatclient-$ProjectVersion-win64" `
         -DisplayName "Onionmixer BroadChat Client" `
         -InstallDir "OnionmixerBroadChatClient" `
-        -Executables "OnionmixerBroadChatClient;Onionmixer BroadChat Client"
+        -Executables "OnionmixerBroadChatClient;Onionmixer BroadChat Client" `
+        -PackageDirectory $NsisOutDir
 } finally {
     Pop-Location
 }
@@ -254,9 +266,9 @@ try {
 # 결과 리포트
 # ---------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== 생성된 패키지 ===" -ForegroundColor Cyan
+Write-Host "=== 생성된 패키지 ($NsisOutDir) ===" -ForegroundColor Cyan
 
-$Installers = Get-ChildItem -Path $BuildDir -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue
+$Installers = Get-ChildItem -Path $NsisOutDir -Filter "onionmixer*-*-win64.exe" -File -ErrorAction SilentlyContinue
 if (-not $Installers) {
     Write-Err "생성된 NSIS 인스톨러가 없습니다. cpack 출력 확인."
     exit 1
@@ -270,7 +282,7 @@ foreach ($pkg in $Installers) {
 Write-Host ""
 Write-Host "설치 예시:" -ForegroundColor Cyan
 foreach ($pkg in $Installers) {
-    Write-Host "  Start-Process -Wait .\build-win\$($pkg.Name)"
+    Write-Host "  Start-Process -Wait .\build-win\NSISBUILD\$($pkg.Name)"
 }
 Write-Host ""
 Write-Ok "패키징 완료 (Linux .deb 정책 매핑: PLAN_COMPILE_WINDOWS.md §3.5)"

@@ -89,6 +89,8 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
+          $NsisOut = "$pwd\build\NSISBUILD"
+          New-Item -Path $NsisOut -ItemType Directory -Force | Out-Null
           cd build
 
           # Server 인스톨러 — server + client 컴포넌트 동봉 (방송 PC).
@@ -99,7 +101,8 @@ jobs:
             "-DCPACK_NSIS_DISPLAY_NAME=Onionmixer Chat Manager" `
             "-DCPACK_NSIS_PACKAGE_NAME=Onionmixer Chat Manager" `
             "-DCPACK_PACKAGE_INSTALL_DIRECTORY=OnionmixerChatManager" `
-            "-DCPACK_PACKAGE_EXECUTABLES=OnionmixerChatManagerQt5;Onionmixer Chat Manager;OnionmixerBroadChatClient;BroadChat Client"
+            "-DCPACK_PACKAGE_EXECUTABLES=OnionmixerChatManagerQt5;Onionmixer Chat Manager;OnionmixerBroadChatClient;BroadChat Client" `
+            "-DCPACK_PACKAGE_DIRECTORY=$NsisOut"
 
           # Client 인스톨러 — client 컴포넌트 단독 (렌더링 PC).
           # Linux 의 onionmixerbroadchatclient_*.deb 등가.
@@ -109,14 +112,15 @@ jobs:
             "-DCPACK_NSIS_DISPLAY_NAME=Onionmixer BroadChat Client" `
             "-DCPACK_NSIS_PACKAGE_NAME=Onionmixer BroadChat Client" `
             "-DCPACK_PACKAGE_INSTALL_DIRECTORY=OnionmixerBroadChatClient" `
-            "-DCPACK_PACKAGE_EXECUTABLES=OnionmixerBroadChatClient;Onionmixer BroadChat Client"
+            "-DCPACK_PACKAGE_EXECUTABLES=OnionmixerBroadChatClient;Onionmixer BroadChat Client" `
+            "-DCPACK_PACKAGE_DIRECTORY=$NsisOut"
 
       - name: Upload NSIS installers
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: nsis-installers-windows
-          path: build/onionmixer*-*-win64.exe
+          path: build/NSISBUILD/onionmixer*-*-win64.exe
           retention-days: 14
 
       - name: Upload build logs on failure
