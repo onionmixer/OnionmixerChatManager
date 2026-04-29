@@ -1314,7 +1314,14 @@ void ConfigurationDialog::applyColorButtonStyle(QPushButton* button, const QColo
 void ConfigurationDialog::pickBroadcastColor(QPushButton* button, const QString& title)
 {
     const QColor initial(button->property("colorValue").toString());
-    const QColor chosen = QColorDialog::getColor(initial, this, title, QColorDialog::ShowAlphaChannel);
+    QColorDialog::ColorDialogOptions opts = QColorDialog::ShowAlphaChannel;
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+    // Windows ChooseColor / macOS NSColorPanel(기본 모드)은 알파 채널 미지원이라
+    // ShowAlphaChannel을 줘도 알파 슬라이더가 노출되지 않아 #00000000 같은 투명색을
+    // 고를 수 없음. Qt 자체 다이얼로그로 강제 폴백.
+    opts |= QColorDialog::DontUseNativeDialog;
+#endif
+    const QColor chosen = QColorDialog::getColor(initial, this, title, opts);
     if (chosen.isValid()) {
         applyColorButtonStyle(button, chosen);
         updateBroadcastPreview();

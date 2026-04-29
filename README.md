@@ -534,7 +534,35 @@ Start-Process -Wait .\build-win\NSISBUILD\onionmixerbroadchatclient-0.1.0-win64.
 - 번역: `share\OnionmixerBroadChatClient\translations\`
 - 사용자 설정: `%APPDATA%\OnionmixerBroadChatClient\<bucket>\`
 
-## 12. 개발자 참고
+## 12. OBS Studio 캡처 호환성 (Windows)
+
+방송창 (`BroadcastChatWindow`) 과 `OnionmixerBroadChatClient` 는 알파 채널이 있는 배경(투명/반투명)을 그리기 위해 Windows에서 **레이어드 윈도우 (`WS_EX_LAYERED`)** 로 동작합니다. 이 때문에 OBS Studio의 Window Capture 기본값(BitBlt)으로는 화면이 캡처되지 않고 마우스 커서 자국만 남는 증상이 나타납니다 — Windows GDI BitBlt 가 layered window 의 픽셀에 접근할 수 없는 OS API 차원의 한계입니다.
+
+해결: OBS의 캡처 방식을 **Windows Graphics Capture (WGC)** 로 변경하면 정상 캡처됩니다.
+
+설정 절차:
+1. OBS Studio 의 Sources 패널에서 BroadChatClient (또는 메인 앱 방송창) 을 캡처하는 Window Capture 소스를 우클릭 → **Properties**
+2. **Capture Method** 드롭다운을 **`Windows 10 (1903 and up)`** 으로 변경
+3. (선택) **Capture Cursor** 체크 해제 — 방송 화면에 마우스 커서가 보이는 것을 원치 않을 때
+4. (선택) **Client Area** 체크 — 본 앱은 이미 frameless라 효과 없음
+
+요구 사항:
+- Windows 10 버전 1903 (2019년 5월) 이상
+- Direct3D 11 지원 GPU (현재 일반 PC에서 사실상 모두 충족)
+
+WGC 사용 시 부수 효과:
+- 일부 Windows 빌드에서 캡처 대상 창에 노란색 외곽선이 표시될 수 있음 (보안 표시). OBS 캡처 결과(방송 송출) 자체에는 보이지 않음.
+
+WGC 를 사용할 수 없는 환경의 대안:
+- **Display Capture** + 방송창을 일정 위치/크기에 고정 → 해당 영역만 사용
+- 모니터 전체를 캡처하므로 다른 창 노출에 주의
+
+기술 배경:
+- Qt 5.15 의 Windows 플랫폼 플러그인은 `WA_TranslucentBackground` 활성화 시 `WS_EX_LAYERED` 비트를 부여해 DWM 합성을 통한 per-pixel alpha 를 지원합니다.
+- OBS의 BitBlt 캡처(`plugins/win-capture/dc-capture.c`)는 GDI DC를 통해 픽셀을 읽지만, layered window 는 픽셀이 GDI DC에 존재하지 않고 DWM의 합성 surface 에만 존재합니다.
+- WGC (`libobs-winrt/winrt-capture.cpp`)는 Direct3D 11 + `Windows.Graphics.Capture` API 를 사용해 DWM 합성 결과를 직접 받으므로 layered window 도 정확히 캡처합니다.
+
+## 13. 개발자 참고
 
 핵심 기준:
 - YouTube / CHZZK adapter는 통합하지 않음

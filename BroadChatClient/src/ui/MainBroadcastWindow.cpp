@@ -47,14 +47,10 @@ MainBroadcastWindow::MainBroadcastWindow(QObject* parent)
     m_window = std::make_unique<BroadcastChatWindow>(m_model, m_cache, nullptr);
     m_window->setWindowTitle(QStringLiteral("OnionmixerBroadChatClient"));
 
-    // v78 옵션 A: ctor 에서 `setTransparentMode(false)` 호출 **제거**.
-    // v60 (구동 시 불투명 모드) 요구는 유지하되, X11 ARGB visual 확보를 위해
-    // **첫 native window 는 반드시 투명 모드 (ctor 기본: WA_TBG=true + Frameless) 로 생성**
-    // 되어야 한다. ctor 에서 바로 `setTransparentMode(false)` 를 호출하면 첫 native window
-    // 가 WA_TBG=false 상태에서 만들어져 non-ARGB visual 이 되고, 이후 사용자 더블클릭
-    // 으로 투명 전환 시 X11 이 ARGB visual 을 재선택하지 못해 배경 처리가 깨졌던 v63 이슈
-    // 의 진짜 원인. 첫 show 는 `MainBroadcastWindow::show()` 에서 수행되며, 그 직후
-    // 같은 함수 안에서 setTransparentMode(false) 로 불투명 모드 전환 (ARGB visual 유지).
+    // 시작 모드는 "불투명 (일반 창)" 이다. 모드 전환은 `MainBroadcastWindow::show()`
+    // 첫 표시 경로에서 수행한다(시작 모드를 일치시키기 위한 의도적 토글).
+    // 옵션 3 적용 후 `WA_TranslucentBackground` 는 항상 true 로 유지되므로 별도 visual
+    // 확보 절차는 필요 없다.
     // PLAN §8.1 v1 우클릭 메뉴 — BroadcastChatWindow에 eventFilter 설치
     m_window->installEventFilter(this);
     // Step 7: geometry signal forward — 소유자가 persist.
@@ -368,16 +364,14 @@ MainBroadcastWindow::~MainBroadcastWindow() = default;
 void MainBroadcastWindow::show()
 {
     if (!m_window) return;
-    // v78 옵션 A: 첫 호출 시 ctor 기본 (투명 + Frameless + WA_TBG=true) 로 show →
-    // X11 이 ARGB visual 선택 → native window 가 ARGB 로 확보된 뒤 즉시 불투명 전환.
-    // 사용자 눈에는 1 frame 내 처리되어 투명 상태가 체감되지 않음. 이후 double-click 으로
-    // 투명 모드 재진입 시 ARGB visual 이 이미 확보돼 있어 배경 alpha 정상 반영.
+    // BroadChatClient 의 시작 모드는 "불투명 (일반 창)" 이다. ctor 기본은 투명 모드라
+    // 첫 표시 직후 한 번 불투명으로 전환해 시작 상태를 일치시킨다.
+    // (옵션 3 적용 후 `WA_TranslucentBackground` 는 항상 true 이므로 ARGB visual 확보를
+    // 위해 첫 show 를 투명으로 띄울 필요는 사라졌다. 다만 모드 토글 경로는 동일하게
+    // 사용해 단일 진입점을 유지한다.)
     const bool firstShow = !m_window->testAttribute(Qt::WA_WState_Created);
     m_window->show();
     if (firstShow) {
-        // native window 생성 (QXcbWindow::create) 이 show 중에 동기 실행되나, X 서버
-        // 측 윈도우 매핑은 이벤트 루프 한 틱 이후 완료될 수 있어 processEvents 로
-        // ARGB visual 확보 시점을 명확히 한 뒤 불투명 모드 전환.
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         m_window->setTransparentMode(false);
     }

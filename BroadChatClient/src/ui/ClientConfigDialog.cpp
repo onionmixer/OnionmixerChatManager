@@ -375,15 +375,19 @@ void ClientConfigDialog::applyUnsetColorButtonStyle(QPushButton* button)
     button->setProperty("colorValue", QString());
 }
 
-// v77: 메인 앱 `ConfigurationDialog::pickBroadcastColor` 완전 동등 — `QColorDialog::getColor`
-// 정적 호출 + `ShowAlphaChannel` 만. `DontUseNativeDialog` 옵션 제거해 OS 네이티브 color
-// picker (KDE/GNOME/macOS/Windows 팔레트) 표시. alpha 채널 슬라이더로 `#00000000` 도 가능.
+// 메인 앱 `ConfigurationDialog::pickBroadcastColor`와 동일 정책.
+// Linux: KDE/GNOME 네이티브 색상 팔레트(알파 슬라이더 지원) 사용.
+// Windows/macOS: 네이티브 ChooseColor / NSColorPanel은 알파 채널을 지원하지 않으므로
+// `DontUseNativeDialog`로 Qt 자체 다이얼로그를 강제해 `#00000000` 등 투명값 선택 가능.
 void ClientConfigDialog::pickBroadcastColor(QPushButton* button, const QString& title)
 {
     if (!button) return;
     const QColor initial(button->property("colorValue").toString());
-    const QColor chosen = QColorDialog::getColor(
-        initial, this, title, QColorDialog::ShowAlphaChannel);
+    QColorDialog::ColorDialogOptions opts = QColorDialog::ShowAlphaChannel;
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+    opts |= QColorDialog::DontUseNativeDialog;
+#endif
+    const QColor chosen = QColorDialog::getColor(initial, this, title, opts);
     if (chosen.isValid()) {
         applyColorButtonStyle(button, chosen);
         if (m_broadcastPreviewDebounce) m_broadcastPreviewDebounce->start();

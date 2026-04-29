@@ -104,6 +104,10 @@ bool BroadcastChatWindow::eventFilter(QObject* watched, QEvent* event)
 void BroadcastChatWindow::paintEvent(QPaintEvent*)
 {
     QPainter painter(this);
+    // SourceOver 기본 모드는 알파 합성을 누적시켜 이전 프레임 잔상이 남을 수 있다.
+    // 배경 채우기 한 회는 Source 로 강제해 매 프레임 기존 픽셀을 완전히 대체한다.
+    // 자식 위젯(QListView 등)은 자체 페인터에서 SourceOver 로 진행되므로 영향 없음.
+    painter.setCompositionMode(QPainter::CompositionMode_Source);
     painter.fillRect(rect(), m_transparentMode ? m_transparentBgColor : m_opaqueBgColor);
 }
 
@@ -131,9 +135,21 @@ void BroadcastChatWindow::showEvent(QShowEvent* event)
 
 Qt::WindowFlags BroadcastChatWindow::windowFlagsForCurrentMode() const
 {
-    Qt::WindowFlags flags = m_transparentMode
-        ? (Qt::FramelessWindowHint | Qt::Tool)
-        : Qt::Window;
+    Qt::WindowFlags flags;
+    if (m_transparentMode) {
+        flags = Qt::FramelessWindowHint | Qt::Tool;
+    } else {
+#ifdef Q_OS_WIN
+        // Qt 5.15 Windows platform plugin 은 `Qt::Window` 단독으로는 WS_EX_LAYERED 를
+        // 부여하지 않아 `WA_TranslucentBackground` 가 무효화된다. FramelessWindowHint 를
+        // 강제해 알파 합성을 활성화. 네이티브 타이틀바는 사라지지만 더블클릭 모드 토글,
+        // 우클릭 메뉴, 트레이 아이콘으로 조작 가능.
+        flags = Qt::Window | Qt::FramelessWindowHint;
+#else
+        // Linux/macOS: 네이티브 프레임 유지. X11 ARGB visual 잔존성으로 알파 정상 동작.
+        flags = Qt::Window;
+#endif
+    }
     if (m_alwaysOnTop) {
         flags |= Qt::WindowStaysOnTopHint;
     }
@@ -181,13 +197,11 @@ void BroadcastChatWindow::setTransparentMode(bool transparent)
 {
     m_transparentMode = transparent;
 
-    // v63: X11에서 `setWindowFlags`가 native window를 재생성할 때 ARGB visual 선택은
-    // 현재 `WA_TranslucentBackground` 속성을 참조함. 이 속성을 모드에 맞게
-    // `setWindowFlags` **이전에** 설정해야 재생성되는 native window에 올바른 visual
-    // (ARGB vs opaque) 이 선택됨. 클라처럼 opaque 기동 후 transparent로 toggle 시
-    // 이전까지는 alpha channel이 소실되어 채팅 본문이 보이지 않던 이슈 해결.
-    // 메인 앱 기존 동작 보존: 생성자 transparent=true 초기값과 동일 효과.
-    setAttribute(Qt::WA_TranslucentBackground, transparent);
+    // 옵션 3: 모드와 무관하게 `WA_TranslucentBackground` 를 항상 true 로 유지한다.
+    // - Windows: `WS_EX_LAYERED` 가 항상 on → 불투명 모드에서도 알파 < 255 색상이
+    //   DWM 합성을 통해 데스크탑에 비친다.
+    // - X11: ARGB visual 이 첫 표시 시 한 번 확정되며 이후 모드 전환과 무관하게 유지.
+    // 모드 전환은 창 장식(Frameless+Tool ↔ Window) 만 결정한다.
     applyWindowFlagsPreservingGeometry(true);
 }
 
@@ -197,7 +211,8 @@ void BroadcastChatWindow::setAlwaysOnTop(bool enabled)
         return;
     }
     m_alwaysOnTop = enabled;
-    setAttribute(Qt::WA_TranslucentBackground, m_transparentMode);
+    // 옵션 3: `WA_TranslucentBackground` 는 생성자에서 true 로 고정. 모드 전환에 따라
+    // 토글하지 않으므로 이 함수에서도 재설정하지 않는다.
 
     // On X11, a visible window can update _NET_WM_STATE_ABOVE without
     // rebuilding native window flags. This matches GNOME's title-bar menu path
