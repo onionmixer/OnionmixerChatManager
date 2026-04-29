@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the 
 
 ## [Unreleased]
 
+### Added
+
+- **Windows 빌드/패키징 지원** (`PLAN_COMPILE_WINDOWS.md`) — Visual Studio 2019/2022 + Qt 5.15.2 MSVC2019_64 조합으로 메인 앱·BroadChatClient 양쪽 모두 빌드·실행 가능. 코드 변경은 없으며(기존 `Q_OS_*` 가드와 `ONIONMIXERCHATMANAGER_HAS_QT_X11_EXTRAS` 매크로로 cross-platform 동작이 이미 보장됨), 빌드/패키징 인프라만 보강:
+  - **CMake**: `WIN32_EXECUTABLE TRUE` (콘솔 창 미동반 GUI subsystem), MSVC `/utf-8 /W3 /permissive-` (한글 주석/리터럴 안전), `windeployqt` POST_BUILD 자동 호출, Qt 런타임 DLL/플러그인을 client 컴포넌트에 install.
+  - **CPack NSIS**: Linux .deb 정책 1:1 매핑 — `onionmixerchatmanagerqt5-<ver>-win64.exe` (서버+클라 동봉) ↔ `onionmixerbroadchatclient-<ver>-win64.exe` (클라 단독). `CPACK_COMPONENT_SERVER_DEPENDS client` 로 Linux `Depends:` 의도 보존. 디렉토리 레이아웃(`bin/`, `share/<app>/translations`, `share/doc/<app>`)도 양 OS 동일.
+  - **빌드 스크립트**: `scripts/package-windows.ps1` (Linux `scripts/package-deb.sh` 와 대칭).
+  - **CI**: `.github/workflows/build.yml` 에 `build-windows` 잡 추가 (windows-2022 + `jurplel/install-qt-action@v4`, streamList=OFF). 기존 `build-linux` 잡은 무회귀.
+  - **첫 도입 범위 외**: protobuf/gRPC vcpkg 통합 (YouTube `streamList`) 은 별도 단계로 분리 — 1차 도입은 `-DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF` 권장. InnerTube WebChat / `liveChatMessages.list` 경로는 영향 없음.
+
 ### Changed
 
 - **YouTube 시청자 카운터 안정화** — 라벨 깜박임("—" flicker) 완화. YouTube Data API v3 `videos.list?part=liveStreamingDetails`의 `concurrentViewers` 필드는 저시청자·라이브 경계 구간에서 간헐적으로 누락되는데, 기존에는 결측 1회에 즉시 placeholder로 전환했음. 4가지 개선 혼합:

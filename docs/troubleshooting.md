@@ -227,7 +227,121 @@ Miss rate: 3.4% (12/350 ticks)         ← 누적 결측 비율
 - 원격 운영 필수 시 **VPN 터널링**: [docs/vpn-guide.md](vpn-guide.md) 참조
 - 경고: `tcp_bind=0.0.0.0` + auth_token 빈 값 조합은 위험 — 설정 창이 Apply 시 modal 경고
 
+## 11. Windows 환경 특이사항
+
+빌드·설치·실행 경로는 [README §2.2](../README.md#22-windows) 와 [PLAN_COMPILE_WINDOWS.md](../PLAN_COMPILE_WINDOWS.md) 참조.
+이하는 Windows 에서만 발생하는 증상.
+
+### 11.1 Windows Defender 방화벽 첫 실행 prompt
+
+#### 증상
+- 메인 앱 처음 실행 시 "Windows Defender 방화벽이 이 앱의 일부 기능을 차단했습니다" 다이얼로그
+- BroadChat 서버(기본 47123)·OAuth 콜백(127.0.0.1:18080) listen 시점
+
+#### 원인
+- 정상 — Windows 방화벽이 새 listening 소켓을 가진 unsigned 실행파일에 대해 사용자 승인 요청
+- NSIS 인스톨러는 현재 방화벽 룰을 자동 등록하지 않음 (의도)
+
+#### 해결
+- 다이얼로그에서 **"개인 네트워크"** 만 체크 후 "액세스 허용" — 같은 LAN 의 클라 PC 접속 허용
+- "공용 네트워크" 는 체크 해제 (외부 노출 방지). VPN 운영은 [vpn-guide.md](vpn-guide.md) 참조
+- 프롬프트를 실수로 Cancel 한 경우: 제어판 → Windows Defender 방화벽 → 앱 또는 기능 허용 → "Onionmixer..." 항목 찾아 개인 체크박스 활성화. 항목이 없으면 "다른 앱 허용..." 으로 exe 직접 추가
+- 진단:
+  ```powershell
+  # 현재 listen 중인 포트 확인 (Linux ss 등가)
+  Get-NetTCPConnection -State Listen | Where-Object LocalPort -in 47123,18080
+  netstat -ano | findstr :47123
+  ```
+
+### 11.2 빌드 시 한글 주석 깨짐 / `warning C4819`
+
+#### 증상
+- MSVC 빌드 로그에 다량의 `warning C4819: The file contains a character that cannot be represented in the current code page (949)`
+- 실행파일 UI 한글 문자열 일부 깨짐 (`???` 또는 다른 글자)
+
+#### 원인
+- 본 프로젝트 소스는 BOM 없는 UTF-8 + 한글 주석/리터럴 다수
+- MSVC 의 기본 source/exec charset 은 시스템 codepage (한국어 Windows 는 CP949) 라서 UTF-8 문자열이 잘못 해석됨
+
+#### 해결
+- CMakeLists.txt 에 `MSVC` 가드로 `/utf-8` 가 이미 추가되어 있음 (PLAN §2.2). 정상 빌드는 `target_compile_options(... PRIVATE /utf-8 /W3 /permissive-)` 가 실제 적용되는지 확인:
+  ```powershell
+  # 빌드 로그에서 /utf-8 인용 확인
+  cmake --build build-win --config Release -- /verbosity:detailed | Select-String "/utf-8"
+  ```
+- 외부 IDE(VS) 에서 직접 cl 호출 시: 프로젝트 속성 → C/C++ → Command Line → `/utf-8` 추가
+- 디렉토리 경로에 한글이 포함되면 일부 도구 실패 가능 — 빌드 디렉토리는 ASCII 만 사용 (예: `C:\dev\omcm`)
+
+### 11.3 실행 시 `vcruntime140.dll`·`MSVCP140.dll` 누락
+
+#### 증상
+- exe 더블클릭 시 "이 앱을 시작할 수 없음 — `VCRUNTIME140.dll` 이 없습니다"
+
+#### 원인
+- 클린 Windows 또는 VS 미설치 PC 에는 Visual C++ Redistributable 이 부재. windeployqt 는 Qt DLL 만 동봉하며 MSVC 런타임은 별도
+
+#### 해결
+- 사용자 PC 에 **Visual C++ Redistributable for Visual Studio 2015–2022 (x64)** 설치
+  - 다운로드: https://aka.ms/vs/17/release/vc_redist.x64.exe
+  - `winget install Microsoft.VCRedist.2015+.x64`
+- NSIS 인스톨러로 설치한 경우 일반적으로 `vc_redist.x64.exe` 가 동봉되도록 windeployqt 가 처리하나, 누락 의심 시 위 수동 설치 권장. 향후 NSIS pre-install 단계에서 자동 실행 옵션 검토 (대상 외)
+
+### 11.4 Qt platform plugin `qwindows.dll` 미발견
+
+#### 증상
+- exe 실행 시 "This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem."
+- 또는 `qt.qpa.plugin: Could not find the Qt platform plugin "windows" in ""`
+
+#### 원인
+- 실행파일과 같은 디렉토리의 `platforms\qwindows.dll` 가 없음
+- 보통 build 디렉토리에서 직접 실행 시 windeployqt POST_BUILD 가 실패했거나, 인스톨러가 아닌 단순 exe 복사로 배포한 경우
+
+#### 해결
+- Build 트리 실행: `cmake --build build-win --config Release` 가 windeployqt 단계까지 포함되었는지 확인. 로그에 `windeployqt: OnionmixerChatManagerQt5` 라인이 있어야 함. 누락 시 Qt5_DIR 환경변수가 정확한지 점검
+  ```powershell
+  $env:Qt5_DIR  # 예: C:\Qt\5.15.2\msvc2019_64\lib\cmake\Qt5
+  Get-Command windeployqt    # PATH 에 잡혀 있는지
+  ```
+- 수동 deploy:
+  ```powershell
+  & "C:\Qt\5.15.2\msvc2019_64\bin\windeployqt.exe" --release `
+      --no-translations --no-system-d3d-compiler --no-opengl-sw `
+      --no-quick-import --no-virtualkeyboard `
+      .\build-win\Release\OnionmixerChatManagerQt5.exe
+  ```
+- 인스톨러로 설치한 경우엔 `C:\Program Files\OnionmixerChatManager\bin\platforms\qwindows.dll` 존재 확인. 부재 시 인스톨러 재실행 (`CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL` 로 깨끗이 재설치됨)
+
+### 11.5 사용자 설정 디렉토리 위치
+
+#### 메인 앱 (OnionmixerChatManagerQt5)
+- 기본: `<exe와 같은 폴더>\config\` (Linux 와 동일 우선순위)
+  - NSIS 기본 설치 시 `C:\Program Files\OnionmixerChatManager\bin\config\` — UAC 보호 영역이라 일반 사용자 권한으로 쓰기 불가 가능
+- 권장: `--config-dir` CLI 옵션으로 사용자 영역 지정
+  ```powershell
+  & "C:\Program Files\OnionmixerChatManager\bin\OnionmixerChatManagerQt5.exe" `
+      --config-dir "$env:APPDATA\OnionmixerChatManagerQt5"
+  ```
+
+#### BroadChatClient (OnionmixerBroadChatClient)
+- 기본: `%APPDATA%\OnionmixerBroadChatClient\<bucket>\` (`ConfigPathResolver` Windows 분기, Linux `~/.config/onionmixer-bcc/<bucket>/` 등가)
+- 시작 메뉴 바로가기로 실행 시 자동 사용 — 일반적으로 별도 설정 불필요
+
+### 11.6 BroadChatClient 트레이 아이콘 미표시
+
+#### 증상
+- BroadChatClient 실행 후 작업 표시줄·트레이 어디에도 아이콘 없음
+
+#### 원인
+- Windows 11 의 트레이 영역은 기본적으로 새 앱 아이콘을 **숨김 영역(▲)** 에 둠
+- (드물게) `QSystemTrayIcon::isSystemTrayAvailable()` false — 보통은 시스템 GUI 세션이 아닌 경우
+
+#### 해결
+- 작업 표시줄 트레이의 `▲` 클릭 → BroadChat 아이콘을 메인 영역으로 드래그 (Windows 11 기준)
+- 또는 설정 → 개인 설정 → 작업 표시줄 → 시스템 트레이 아이콘 → BroadChat 활성화
+
 ## 로그 수집 (이슈 제보 시)
+
+### Linux
 
 ```bash
 # 서버 앱 (GUI 프로세스)
@@ -242,5 +356,24 @@ OnionmixerBroadChatClient 2>&1 | tee /tmp/client.log
 # 동시
 tail -F /tmp/main-app.log /tmp/client.log
 ```
+
+### Windows (PowerShell)
+
+GUI subsystem 빌드(`WIN32_EXECUTABLE`)이므로 stdout/stderr 가 콘솔에 직접 출력되지 않는다. 두 가지 방법:
+
+```powershell
+# 1) cmd 의 redirection 으로 파일 캡처 (PowerShell 의 `2>&1` 은 GUI 앱에서 제한적)
+cmd /c '"C:\Program Files\OnionmixerChatManager\bin\OnionmixerChatManagerQt5.exe" 2>&1 > %TEMP%\main-app.log'
+
+# 2) trace 활성화 + tail 등가 (Get-Content -Wait)
+$env:ONIONMIXERCHATMANAGER_BROADCHAT_TRACE = "1"
+$env:QT_LOGGING_RULES = "broadchat*=true"
+Start-Process -FilePath "C:\Program Files\OnionmixerChatManager\bin\OnionmixerChatManagerQt5.exe" `
+    -RedirectStandardOutput "$env:TEMP\main-app.log" `
+    -RedirectStandardError "$env:TEMP\main-app.err"
+Get-Content "$env:TEMP\main-app.log" -Wait
+```
+
+DebugView (Sysinternals) 로 `OutputDebugString` 도 함께 캡처하면 Qt 의 `qWarning`/`qDebug` 가 보인다 — 다만 본 프로젝트는 stdout 경로를 우선 사용하므로 보조 수단.
 
 **민감정보 주의**: 로그에 peer IP는 포함되나 auth_token은 제외됨 (v21-γ-9). 그러나 LAN IP·clientId가 노출되므로 public 이슈 첨부 시 마스킹 권장.

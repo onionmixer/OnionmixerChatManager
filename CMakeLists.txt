@@ -228,6 +228,15 @@ add_executable(OnionmixerChatManagerQt5
 if (WIN32)
     target_sources(OnionmixerChatManagerQt5 PRIVATE
         resources/app_icon.rc)
+    # GUI subsystem (no console window pop-up). Qt provides WinMain via Qt5::WinMain
+    # implicitly through qtmain.lib when WIN32_EXECUTABLE is set.
+    set_target_properties(OnionmixerChatManagerQt5 PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+# MSVC — force UTF-8 source/exec charset (Korean comments + literals) and standard conformance.
+if (MSVC)
+    target_compile_options(onionmixer_chat_shared PRIVATE /utf-8 /W3 /permissive-)
+    target_compile_options(OnionmixerChatManagerQt5 PRIVATE /utf-8 /W3 /permissive-)
 endif()
 
 target_include_directories(OnionmixerChatManagerQt5 PRIVATE
@@ -406,6 +415,73 @@ if (TARGET OnionmixerBroadChatClient)
     endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# Windows — windeployqt POST_BUILD + Qt 런타임 DLL/플러그인 install (client 컴포넌트)
+# PLAN_COMPILE_WINDOWS.md §2.5·§2.6·§3.5 참조.
+# Linux 빌드에서는 전부 no-op (WIN32 가드).
+# ---------------------------------------------------------------------------
+if (WIN32)
+    find_program(ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt
+        HINTS "${Qt5_DIR}/../../../bin"
+              "$ENV{QTDIR}/bin"
+        DOC "Path to Qt windeployqt tool")
+
+    if (ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE)
+        # 메인 앱 + 클라 모두 같은 build output 디렉토리에 DLL/플러그인 폴더 deploy.
+        # 두 타깃 각각에 POST_BUILD 등록 — Ninja Multi-Config 등 출력 디렉토리가 다른
+        # 경우에도 양쪽 모두 deploy 보장.
+        add_custom_command(TARGET OnionmixerChatManagerQt5 POST_BUILD
+            COMMAND "${ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE}"
+                $<$<CONFIG:Debug>:--debug>
+                $<$<NOT:$<CONFIG:Debug>>:--release>
+                --no-translations
+                --no-system-d3d-compiler
+                --no-opengl-sw
+                --no-quick-import
+                --no-virtualkeyboard
+                $<TARGET_FILE:OnionmixerChatManagerQt5>
+            COMMENT "windeployqt: OnionmixerChatManagerQt5"
+            VERBATIM)
+
+        if (TARGET OnionmixerBroadChatClient)
+            add_custom_command(TARGET OnionmixerBroadChatClient POST_BUILD
+                COMMAND "${ONIONMIXERCHATMANAGER_WINDEPLOYQT_EXECUTABLE}"
+                    $<$<CONFIG:Debug>:--debug>
+                    $<$<NOT:$<CONFIG:Debug>>:--release>
+                    --no-translations
+                    --no-system-d3d-compiler
+                    --no-opengl-sw
+                    --no-quick-import
+                    --no-virtualkeyboard
+                    $<TARGET_FILE:OnionmixerBroadChatClient>
+                COMMENT "windeployqt: OnionmixerBroadChatClient"
+                VERBATIM)
+        endif()
+    else()
+        message(WARNING
+            "windeployqt not found — Windows install bundle will be missing Qt runtime DLLs. "
+            "Set Qt5_DIR or PATH to a Qt 5.15+ binary directory.")
+    endif()
+
+    # Qt 런타임 DLL/플러그인 폴더를 client 컴포넌트에 install.
+    # 이유: server 인스톨러는 `CPACK_COMPONENT_SERVER_DEPENDS client` 로 client 를 자동 포함.
+    # 결과적으로 server·client 어느 인스톨러로 설치해도 Qt DLL 이 동봉되며, client 단독
+    # 인스톨러도 자체 동작 가능 (Linux .deb 의 클라 독립 정책 보존).
+    install(DIRECTORY "$<TARGET_FILE_DIR:OnionmixerBroadChatClient>/"
+        DESTINATION bin
+        COMPONENT client
+        FILES_MATCHING
+            REGEX "(Qt5[A-Za-z0-9]*\\.dll|libEGL\\.dll|libGLESv2\\.dll|d3dcompiler.*\\.dll|opengl32sw\\.dll|vc_redist.*\\.exe)$")
+
+    foreach(_oncm_qt_plugin_dir platforms imageformats iconengines styles tls)
+        install(DIRECTORY "$<TARGET_FILE_DIR:OnionmixerBroadChatClient>/${_oncm_qt_plugin_dir}"
+            DESTINATION bin
+            COMPONENT client
+            OPTIONAL)
+    endforeach()
+endif()
+
 # CPack 공통
 set(CPACK_PACKAGE_NAME "onionmixerchatmanager")
 set(CPACK_PACKAGE_VENDOR "Onionmixer")
@@ -413,38 +489,84 @@ set(CPACK_PACKAGE_CONTACT "onionmixer@gmail.com")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "YouTube/CHZZK live chat manager with optional external broadcast overlay.")
-
-set(CPACK_GENERATOR "DEB")
-set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_COMPONENTS_ALL server client)
-set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Onionmixer <onionmixer@gmail.com>")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/onionmixer/OnionmixerChatManager")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) # Qt5 등 라이브러리 의존성 자동 감지
 
-# 서버 패키지 (onionmixerchatmanagerqt5)
-set(CPACK_DEBIAN_SERVER_PACKAGE_NAME "onionmixerchatmanagerqt5")
-set(CPACK_DEBIAN_SERVER_PACKAGE_SECTION "net")
-set(CPACK_DEBIAN_SERVER_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_SERVER_PACKAGE_DEPENDS
-    "onionmixerbroadchatclient (= ${PROJECT_VERSION})")
-set(CPACK_DEBIAN_SERVER_DESCRIPTION
-    "YouTube/CHZZK live chat manager with BroadChat TCP server.
+if (WIN32)
+    # ---------------------------------------------------------------------------
+    # Windows — NSIS component-based installers (Linux .deb 정책 1:1 매핑)
+    # PLAN_COMPILE_WINDOWS.md §2.4·§3.5 참조.
+    #   onionmixerchatmanagerqt5-<ver>-win64.exe   ↔ onionmixerchatmanagerqt5_*.deb
+    #   onionmixerbroadchatclient-<ver>-win64.exe  ↔ onionmixerbroadchatclient_*.deb
+    # ---------------------------------------------------------------------------
+    set(CPACK_GENERATOR "NSIS")
+    set(CPACK_NSIS_COMPONENT_INSTALL ON)
+    set(CPACK_COMPONENTS_GROUPING IGNORE)  # 컴포넌트당 별도 인스톨러 산출
+
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "OnionmixerChatManager")
+    set(CPACK_NSIS_DISPLAY_NAME "Onionmixer Chat Manager")
+    set(CPACK_NSIS_PACKAGE_NAME "OnionmixerChatManager")
+    set(CPACK_NSIS_HELP_LINK "https://github.com/onionmixer/OnionmixerChatManager")
+    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/onionmixer/OnionmixerChatManager")
+    set(CPACK_NSIS_CONTACT "${CPACK_PACKAGE_CONTACT}")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH OFF)
+    set(CPACK_NSIS_MUI_ICON
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app_icon.ico")
+    set(CPACK_NSIS_MUI_UNIICON
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app_icon.ico")
+
+    # 시작 메뉴 바로가기 (Linux .desktop 등가)
+    set(CPACK_PACKAGE_EXECUTABLES
+        "OnionmixerChatManagerQt5" "Onionmixer Chat Manager"
+        "OnionmixerBroadChatClient" "BroadChat Client")
+
+    # 컴포넌트 메타 (NSIS 컴포넌트 페이지 + Add/Remove Programs 표시명)
+    set(CPACK_COMPONENT_SERVER_DISPLAY_NAME
+        "Onionmixer Chat Manager (Server + Overlay)")
+    set(CPACK_COMPONENT_SERVER_DESCRIPTION
+        "Main app + external overlay client. Use this on the broadcasting PC.")
+    set(CPACK_COMPONENT_SERVER_DEPENDS client)  # 서버 → 클라 일방향 의존 (Linux .deb 정책 매핑)
+
+    set(CPACK_COMPONENT_CLIENT_DISPLAY_NAME "BroadChat Client (Standalone)")
+    set(CPACK_COMPONENT_CLIENT_DESCRIPTION
+        "Standalone overlay client for rendering-only PC. Connects to a server over TCP.")
+
+    # 컴포넌트별 출력 파일명 — Linux .deb 명명규칙과 정렬
+    set(CPACK_NSIS_PACKAGE_NAME_SERVER "onionmixerchatmanagerqt5")
+    set(CPACK_NSIS_PACKAGE_NAME_CLIENT "onionmixerbroadchatclient")
+else()
+    # Linux DEB — 기존 동작 보존 (변경 없음)
+    set(CPACK_GENERATOR "DEB")
+    set(CPACK_DEB_COMPONENT_INSTALL ON)
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Onionmixer <onionmixer@gmail.com>")
+    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/onionmixer/OnionmixerChatManager")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) # Qt5 등 라이브러리 의존성 자동 감지
+
+    # 서버 패키지 (onionmixerchatmanagerqt5)
+    set(CPACK_DEBIAN_SERVER_PACKAGE_NAME "onionmixerchatmanagerqt5")
+    set(CPACK_DEBIAN_SERVER_PACKAGE_SECTION "net")
+    set(CPACK_DEBIAN_SERVER_PACKAGE_PRIORITY "optional")
+    set(CPACK_DEBIAN_SERVER_PACKAGE_DEPENDS
+        "onionmixerbroadchatclient (= ${PROJECT_VERSION})")
+    set(CPACK_DEBIAN_SERVER_DESCRIPTION
+        "YouTube/CHZZK live chat manager with BroadChat TCP server.
  Main application that connects to YouTube and CHZZK live chats,
  displays them in messenger/table views, and hosts a BroadChat
  TCP server for external overlay clients.
  Installing this package also installs onionmixerbroadchatclient
  (which can also be installed standalone on rendering-only PCs).")
 
-# 클라 패키지 (onionmixerbroadchatclient)
-set(CPACK_DEBIAN_CLIENT_PACKAGE_NAME "onionmixerbroadchatclient")
-set(CPACK_DEBIAN_CLIENT_PACKAGE_SECTION "net")
-set(CPACK_DEBIAN_CLIENT_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_CLIENT_DESCRIPTION
-    "External broadcast overlay client for OnionmixerChatManager.
+    # 클라 패키지 (onionmixerbroadchatclient)
+    set(CPACK_DEBIAN_CLIENT_PACKAGE_NAME "onionmixerbroadchatclient")
+    set(CPACK_DEBIAN_CLIENT_PACKAGE_SECTION "net")
+    set(CPACK_DEBIAN_CLIENT_PACKAGE_PRIORITY "optional")
+    set(CPACK_DEBIAN_CLIENT_DESCRIPTION
+        "External broadcast overlay client for OnionmixerChatManager.
  Standalone Qt5 GUI that connects to a running
  OnionmixerChatManagerQt5 server via TCP and renders an
  independent broadcast overlay window (transparent/opaque
  modes, multiple instances, per-window geometry).")
+endif()
 
 include(CPack)

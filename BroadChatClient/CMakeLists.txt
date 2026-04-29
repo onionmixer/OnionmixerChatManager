@@ -77,6 +77,13 @@ add_executable(OnionmixerBroadChatClient
 if (WIN32)
     target_sources(OnionmixerBroadChatClient PRIVATE
         resources/app_icon.rc)
+    # GUI subsystem (no console window pop-up); WinMain provided by Qt5::WinMain via qtmain.lib.
+    set_target_properties(OnionmixerBroadChatClient PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+# MSVC — UTF-8 source/exec charset + standard conformance (mirrors top-level).
+if (MSVC)
+    target_compile_options(OnionmixerBroadChatClient PRIVATE /utf-8 /W3 /permissive-)
 endif()
 
 # v71: macOS — .app 번들 생성 시 .icns 를 Resources/ 에 포함하고 Info.plist 참조.
