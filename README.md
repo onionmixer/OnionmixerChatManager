@@ -60,6 +60,7 @@ ctest --test-dir build --output-on-failure
 - Qt 5.15.2 MSVC 2019 64-bit (`C:\Qt\5.15.2\msvc2019_64`)
 - CMake 3.16+
 - NSIS (`choco install nsis` — 패키징 시점에만 필요)
+- vcpkg (선택 — YouTube `streamList` 활성화 시; `git clone https://github.com/microsoft/vcpkg && bootstrap-vcpkg.bat`)
 
 스크립트 빌드 (PowerShell):
 
@@ -80,20 +81,36 @@ $env:VCPKG_ROOT = "C:\dev\vcpkg"
 수동 빌드:
 
 ```powershell
+# 기본 — streamList=OFF (vcpkg 미사용)
 cmake -S . -B build-win -G "Visual Studio 17 2022" -A x64 `
       -DCMAKE_PREFIX_PATH="C:\Qt\5.15.2\msvc2019_64" `
       -DCMAKE_BUILD_TYPE=Release `
       -DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF
+
+# 또는 — streamList=ON (vcpkg 부트스트랩 후, protobuf/grpc 자동 install)
+cmake -S . -B build-win -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_TOOLCHAIN_FILE="C:\dev\vcpkg\scripts\buildsystems\vcpkg.cmake" `
+      -DVCPKG_TARGET_TRIPLET=x64-windows `
+      -DCMAKE_PREFIX_PATH="C:\Qt\5.15.2\msvc2019_64" `
+      -DCMAKE_BUILD_TYPE=Release
+
 cmake --build build-win --config Release --parallel
 ctest --test-dir build-win -C Release --output-on-failure
 ```
 
-빌드 산출물:
+빌드 산출물 (multi-config generator — VS 17 2022 기준, Release 폴더 안에 위치):
 - `build-win\Release\OnionmixerChatManagerQt5.exe` (메인 앱, GUI subsystem)
-- `build-win\Release\OnionmixerBroadChatClient.exe` (오버레이 클라)
+- `build-win\BroadChatClient\Release\OnionmixerBroadChatClient.exe` (오버레이 클라)
 - `build-win\Release\Qt5*.dll`, `platforms\`, `imageformats\`, ... (windeployqt 산출)
+- `build-win\NSISBUILD\onionmixerchatmanagerqt5-0.1.0-win64.exe` (서버+클라 인스톨러)
+- `build-win\NSISBUILD\onionmixerbroadchatclient-0.1.0-win64.exe` (클라 단독 인스톨러)
 
-YouTube `streamList` (gRPC) 빌드는 vcpkg 통합 필요 — 1차 도입은 `-DONIONMIXERCHATMANAGER_ENABLE_YT_STREAMLIST=OFF` 권장. InnerTube WebChat / `liveChatMessages.list` 경로는 영향 없음.
+> Ninja generator 사용 시 (single-config): `Release\` sub-디렉토리 없이 `build-win\` 직접에 .exe 와 .dll 산출.
+
+YouTube `streamList` (gRPC stream 기반 채팅 수신 경로) 빌드:
+- **default**: streamList=OFF — InnerTube WebChat 폴링만으로 채팅 수신 (Linux/Windows 동일).
+- **활성화** (선택): vcpkg 부트스트랩 후 `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` 또는 스크립트의 `-VcpkgRoot` 옵션 → `protobuf`/`grpc` 자동 install 후 streamList=ON 빌드. 첫 빌드 30분+ (vcpkg cache miss).
+- streamList 미빌드 시에도 InnerTube WebChat / `liveChatMessages.list` 경로는 영향 없음 — 사용자 체감 채팅 수신 동작 동일.
 
 ## 3. 설정 파일 위치
 
@@ -478,37 +495,44 @@ Linux .deb 와 동등한 정책으로 **두 개의 독립 NSIS 인스톨러**를
 | `onionmixerchatmanagerqt5-<ver>-win64.exe` | `onionmixerchatmanagerqt5_*.deb` | client 컴포넌트 동봉 | 방송 PC (서버 + 클라 동시 설치) |
 | `onionmixerbroadchatclient-<ver>-win64.exe` | `onionmixerbroadchatclient_*.deb` | 독립 (Qt 런타임 동봉) | 렌더링 전용 PC (클라만) |
 
-빌드·패키지 생성:
+빌드·패키지 생성 (스크립트 권장 — cpack 두 번 호출로 두 인스톨러 자동 산출):
 
 ```powershell
-.\scripts\package-windows.ps1
-# 또는 수동:
-cmake -S . -B build-win -G "Visual Studio 17 2022" -A x64 `
-      -DCMAKE_PREFIX_PATH="C:\Qt\5.15.2\msvc2019_64" `
-      -DCMAKE_BUILD_TYPE=Release
-cmake --build build-win --config Release --parallel
-cd build-win; cpack -G NSIS -C Release
+.\scripts\package-windows.ps1                      # streamList=OFF 빌드 + 두 NSIS 인스톨러
+.\scripts\package-windows.ps1 -VcpkgRoot "C:\dev\vcpkg"   # streamList=ON 활성화
 ```
+
+산출 위치: `build-win\NSISBUILD\` (빌드 산출물과 분리).
+
+> NSIS generator 의 한계 (`COMPONENTS_GROUPING=IGNORE` 가 silent `ONE_PER_GROUP` 처리) 로 단일 cpack 호출은 단일 인스톨러만 생성. 스크립트는 cpack 을 두 번 호출하면서 `-D CPACK_COMPONENTS_ALL=...` 와 `-D CPACK_PACKAGE_FILE_NAME=...` 으로 컴포넌트 조합·파일명을 override — Linux DEB generator 의 `CPACK_DEB_COMPONENT_INSTALL=ON` 동작 재현. 수동 cpack 호출 detail 은 `scripts\package-windows.ps1` 의 `Invoke-CpackProfile` 함수 참조.
 
 설치:
 
 ```powershell
 # 방송 PC (서버 + 클라 모두 설치됨)
-Start-Process -Wait .\build-win\onionmixerchatmanagerqt5-0.1.0-win64.exe
+Start-Process -Wait .\build-win\NSISBUILD\onionmixerchatmanagerqt5-0.1.0-win64.exe
 
 # 렌더링 PC (클라만)
-Start-Process -Wait .\build-win\onionmixerbroadchatclient-0.1.0-win64.exe
+Start-Process -Wait .\build-win\NSISBUILD\onionmixerbroadchatclient-0.1.0-win64.exe
 
 # 제거: 제어판 → 프로그램 추가/제거 → 해당 항목 선택
 ```
 
-설치 후 경로 (NSIS 기본 `C:\Program Files\OnionmixerChatManager\`):
+설치 후 경로:
 
+서버 인스톨러 (방송 PC) — `C:\Program Files\OnionmixerChatManager\`:
 - 실행파일: `bin\OnionmixerChatManagerQt5.exe`, `bin\OnionmixerBroadChatClient.exe`
 - Qt 런타임: `bin\Qt5*.dll`, `bin\platforms\qwindows.dll`, `bin\imageformats\`, `bin\styles\`, `bin\tls\` (windeployqt 산출)
+- streamList 의존 DLL (streamList=ON 빌드 시): `bin\libprotobuf.dll`, `bin\libssl-3-x64.dll`, `bin\libcrypto-3-x64.dll`, `bin\abseil_dll.dll`, `bin\cares.dll`, `bin\re2.dll`, `bin\z.dll`
 - 번역: `share\OnionmixerChatManagerQt5\translations\`, `share\OnionmixerBroadChatClient\translations\`
 - 설정 템플릿: `share\OnionmixerChatManagerQt5\config.example\`
 - 사용자 설정: `<exe>\config\` (메인 앱 기본) / `%APPDATA%\OnionmixerBroadChatClient\<bucket>\` (클라)
+
+클라 단독 인스톨러 (렌더링 PC) — `C:\Program Files\OnionmixerBroadChatClient\`:
+- 실행파일: `bin\OnionmixerBroadChatClient.exe` (메인 앱 미설치)
+- Qt 런타임 + streamList 의존 DLL 동일 (windeployqt + vcpkg 산출 동봉으로 자체 동작 보장)
+- 번역: `share\OnionmixerBroadChatClient\translations\`
+- 사용자 설정: `%APPDATA%\OnionmixerBroadChatClient\<bucket>\`
 
 ## 12. 개발자 참고
 
