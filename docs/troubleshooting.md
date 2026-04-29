@@ -229,7 +229,7 @@ Miss rate: 3.4% (12/350 ticks)         ← 누적 결측 비율
 
 ## 11. Windows 환경 특이사항
 
-빌드·설치·실행 경로는 [README §2.2](../README.md#22-windows) 와 [PLAN_COMPILE_WINDOWS.md](../PLAN_COMPILE_WINDOWS.md) 참조.
+빌드·설치·실행 경로는 [README §2.2](../README.md#22-windows) 참조.
 이하는 Windows 에서만 발생하는 증상.
 
 ### 11.1 Windows Defender 방화벽 첫 실행 prompt
