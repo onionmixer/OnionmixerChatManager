@@ -10,6 +10,8 @@
 #include <QObject>
 #include <QString>
 
+class QTimer;
+
 class TokenManager : public QObject {
     Q_OBJECT
 public:
@@ -18,6 +20,9 @@ public:
 
     void tryStartupTokenRefresh();
     void refreshAllTokenUi();
+    // H2 — 외부 (예: viewer-count 경로 401 회복) 에서 즉시 refresh 재시도가 필요할 때 호출.
+    // m_pendingTokenFlows 충돌 시 false 반환 (이미 진행 중이라는 뜻).
+    bool requestImmediateRefresh(PlatformId platform);
 
     PlatformSettings settingsFor(PlatformId platform) const;
     TokenState inferTokenState(const TokenRecord* record) const;
@@ -67,6 +72,12 @@ private:
     bool startAuthCodeExchangeFlow(PlatformId platform, const PlatformSettings& settings,
         const QString& code, const QString& codeVerifier, const QString& authState);
     void tryStartupTokenRefreshForPlatform(PlatformId platform);
+    // H2 — accessExpireAtUtc 기준 만료 ≈60s 전에 자동 refresh 가 발동되도록 per-platform timer 예약/재예약.
+    // 이미 진행 중인 timer 가 있으면 stop 후 재예약.
+    void scheduleNextRefresh(PlatformId platform);
+    // 만료 timer 가 발동했을 때 호출됨. silent refresh 시도. 진행 중이면 skip.
+    void onPreemptiveRefreshFired(PlatformId platform);
+    void cancelScheduledRefresh(PlatformId platform);
     void refreshTokenUi(PlatformId platform);
     void appendTokenAudit(PlatformId platform, const QString& action, bool ok, const QString& detail);
     QUrl buildAuthorizationUrl(PlatformId platform, const PlatformSettings& settings,
@@ -83,6 +94,7 @@ private:
     QHash<PlatformId, PendingTokenFlowContext> m_pendingTokenFlows;
     QHash<PlatformId, bool> m_pendingTokenRevokes;
     QHash<PlatformId, bool> m_authInProgress;
+    QHash<PlatformId, QTimer*> m_preemptiveRefreshTimers;   // H2
 };
 
 #endif // TOKEN_MANAGER_H

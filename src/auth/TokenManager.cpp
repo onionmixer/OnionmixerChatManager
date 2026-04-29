@@ -5,9 +5,12 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QRegularExpression>
+#include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QUuid>
+
+#include <algorithm>
 
 namespace {
 
@@ -227,6 +230,121 @@ void TokenManager::tryStartupTokenRefresh()
     tryStartupTokenRefreshForPlatform(PlatformId::Chzzk);
 }
 
+// H2 — 만료 ≈60s 전 자동 refresh 가 발동되도록 timer 예약/재예약.
+// VALID 인 토큰의 만료 cliff 를 사전 차단. 호출 지점:
+//  - onTokenGranted 성공 직후 (다음 만료 예약)
+//  - tryStartupTokenRefreshForPlatform 의 VALID 분기 (initial 예약)
+//  - requestImmediateRefresh 등 외부 트리거 후 (실패 시 재시도용)
+void TokenManager::scheduleNextRefresh(PlatformId platform)
+{
+    TokenRecord rec;
+    if (!m_tokenVault.read(platform, &rec)) {
+        cancelScheduledRefresh(platform);
+        return;
+    }
+    if (!rec.accessExpireAtUtc.isValid() || rec.refreshToken.trimmed().isEmpty()) {
+        cancelScheduledRefresh(platform);
+        return;
+    }
+    const PlatformSettings settings = settingsFor(platform);
+    if (!settings.enabled) {
+        cancelScheduledRefresh(platform);
+        return;
+    }
+
+    QTimer* timer = m_preemptiveRefreshTimers.value(platform, nullptr);
+    if (!timer) {
+        timer = new QTimer(this);
+        timer->setSingleShot(true);
+        connect(timer, &QTimer::timeout, this, [this, platform]() {
+            onPreemptiveRefreshFired(platform);
+        });
+        m_preemptiveRefreshTimers.insert(platform, timer);
+    }
+    timer->stop();
+
+    // 만료 60s 전 발동. 만료가 임박하면 1s 후 발동 (음수 보정).
+    constexpr qint64 kLeadSec = 60;
+    const qint64 secsUntilExpiry =
+        QDateTime::currentDateTimeUtc().secsTo(rec.accessExpireAtUtc);
+    const qint64 fireInSec = std::max<qint64>(1, secsUntilExpiry - kLeadSec);
+    // QTimer interval 은 32-bit 정수 ms. 90일 refresh expiry 같은 값은 access 가 아니라 무관.
+    // access expiry 는 보통 1h. clamp 안전망만.
+    constexpr qint64 kMaxFireSec = 24 * 60 * 60;
+    const qint64 clamped = std::min(fireInSec, kMaxFireSec);
+    timer->start(static_cast<int>(clamped * 1000));
+    emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-SCHED] %1 in=%2s expireAt=%3")
+        .arg(platformKey(platform))
+        .arg(clamped)
+        .arg(rec.accessExpireAtUtc.toString(Qt::ISODate)));
+}
+
+void TokenManager::onPreemptiveRefreshFired(PlatformId platform)
+{
+    if (m_pendingTokenFlows.contains(platform) || m_pendingTokenRevokes.value(platform, false)) {
+        // 다른 flow 진행 중 — 끝나면 onTokenGranted 가 알아서 다시 schedule.
+        emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 another flow in progress").arg(platformKey(platform)));
+        return;
+    }
+    const PlatformSettings settings = settingsFor(platform);
+    if (!settings.enabled) return;
+
+    TokenRecord record;
+    if (!m_tokenVault.read(platform, &record) || record.refreshToken.trimmed().isEmpty()) {
+        emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 no refresh token").arg(platformKey(platform)));
+        return;
+    }
+    if (settings.clientId.trimmed().isEmpty() || settings.tokenEndpoint.trimmed().isEmpty()) {
+        emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 OAuth config incomplete").arg(platformKey(platform)));
+        return;
+    }
+    if (platform == PlatformId::Chzzk && settings.clientSecret.trimmed().isEmpty()) {
+        emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-SKIP] %1 chzzk client_secret missing").arg(platformKey(platform)));
+        return;
+    }
+
+    emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-FIRE] %1").arg(platformKey(platform)));
+    emit tokenOperationStarted(platform, QStringLiteral("token_refresh"));
+    emit tokenStateChanged(platform, TokenState::REFRESHING, tmText("Preemptive auto refresh..."));
+    if (!startTokenRefreshFlow(platform, settings, record)) {
+        emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-FAIL] %1 startTokenRefreshFlow returned false").arg(platformKey(platform)));
+        // 60s 후 재시도. 단 VALID 상태가 아니면 의미 없으므로 scheduleNextRefresh 에 판단 위임.
+        QTimer::singleShot(60 * 1000, this, [this, platform]() {
+            scheduleNextRefresh(platform);
+        });
+    }
+}
+
+void TokenManager::cancelScheduledRefresh(PlatformId platform)
+{
+    QTimer* timer = m_preemptiveRefreshTimers.value(platform, nullptr);
+    if (timer && timer->isActive()) {
+        timer->stop();
+    }
+}
+
+bool TokenManager::requestImmediateRefresh(PlatformId platform)
+{
+    if (m_pendingTokenFlows.contains(platform) || m_pendingTokenRevokes.value(platform, false)) {
+        return false;
+    }
+    const PlatformSettings settings = settingsFor(platform);
+    if (!settings.enabled) return false;
+
+    TokenRecord record;
+    if (!m_tokenVault.read(platform, &record) || record.refreshToken.trimmed().isEmpty()) {
+        return false;
+    }
+    if (settings.clientId.trimmed().isEmpty() || settings.tokenEndpoint.trimmed().isEmpty()) {
+        return false;
+    }
+
+    emit logMessage(QStringLiteral("[TOKEN-AUTO-REFRESH-401] %1 immediate refresh due to 401").arg(platformKey(platform)));
+    emit tokenOperationStarted(platform, QStringLiteral("token_refresh"));
+    emit tokenStateChanged(platform, TokenState::REFRESHING, tmText("Refreshing token (401 recovery)..."));
+    return startTokenRefreshFlow(platform, settings, record);
+}
+
 void TokenManager::tryStartupTokenRefreshForPlatform(PlatformId platform)
 {
     const PlatformSettings settings = settingsFor(platform);
@@ -237,7 +355,11 @@ void TokenManager::tryStartupTokenRefreshForPlatform(PlatformId platform)
     if (!m_tokenVault.read(platform, &record)) return;
 
     const TokenState state = inferTokenState(&record);
-    if (state != TokenState::EXPIRED && state != TokenState::EXPIRING_SOON) return;
+    if (state != TokenState::EXPIRED && state != TokenState::EXPIRING_SOON) {
+        // VALID 상태여도 만료 cliff 사전 차단을 위해 timer 예약. (H2)
+        scheduleNextRefresh(platform);
+        return;
+    }
 
     if (record.refreshToken.trimmed().isEmpty()) {
         const QString detail = tmText("Startup auto refresh skipped: refresh token missing.");
@@ -311,6 +433,7 @@ void TokenManager::onTokenDeleteRequested(PlatformId platform)
     } else {
         const bool cleared = m_tokenVault.clear(platform);
         m_authInProgress.insert(platform, false);
+        cancelScheduledRefresh(platform);   // H2
         refreshTokenUi(platform);
         emit tokenUpdated(platform, QString());
         emit runtimePhaseChanged(platform, QStringLiteral("IDLE"));
@@ -509,6 +632,8 @@ void TokenManager::onTokenGranted(PlatformId platform, const QString& flow,
     emit logMessage(QStringLiteral("[TOKEN-OK] %1 flow=%2").arg(platformKey(platform), flow));
     emit profileSyncNeeded(platform, accessToken);
     emit liveProbeNeeded();
+    // H2 — 다음 만료 cliff 자동 차단 timer 재예약.
+    scheduleNextRefresh(platform);
 }
 
 void TokenManager::onTokenFailed(PlatformId platform, const QString& flow,
@@ -532,6 +657,7 @@ void TokenManager::onTokenFailed(PlatformId platform, const QString& flow,
 void TokenManager::onTokenRevoked(PlatformId platform, const QString& flow)
 {
     m_pendingTokenRevokes.remove(platform);
+    cancelScheduledRefresh(platform);   // H2
     const bool localCleared = m_tokenVault.clear(platform);
     refreshTokenUi(platform);
     emit tokenUpdated(platform, QString());

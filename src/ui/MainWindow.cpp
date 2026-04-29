@@ -611,6 +611,32 @@ void MainWindow::onWarningRaised(const QString& code, const QString& message)
                        || normalizedInnerCode == QStringLiteral("YT_STREAM_LIVECHAT_ID_MISSING")) {
                 setLiveBroadcastState(PlatformId::YouTube, LiveBroadcastState::UNKNOWN, message);
             }
+            // H1-B — 401 (OAuth 토큰 만료) 검출 시 자동 refresh 트리거.
+            // FIX_YOUTUBE_COUNTER.md §6 H1-B 참고. 두 가지 검출 경로:
+            //   1) 명시적 인증 코드 — YT_STREAM_UNAUTHENTICATED, YT_STREAM_TOKEN_MISSING
+            //   2) 응답 메시지 휴리스틱 — Google API 의 401 표준 문구가 LIVE_DISCOVERY_FAILED /
+            //      CHAT_POLL_FAILED 의 message 에 포함된 경우
+            // refresh 성공 후엔 TokenManager 가 tokenUpdated 시그널 → adapter 재시작 →
+            // 다음 polling tick 에서 자연 회복. 별도 명시 retry 불필요.
+            const bool authFailureCode =
+                normalizedInnerCode == QStringLiteral("YT_STREAM_UNAUTHENTICATED")
+                || normalizedInnerCode == QStringLiteral("YT_STREAM_TOKEN_MISSING");
+            const bool authFailureLikelyByMessage =
+                (normalizedInnerCode == QStringLiteral("LIVE_DISCOVERY_FAILED")
+                 || normalizedInnerCode == QStringLiteral("CHAT_POLL_FAILED"))
+                && (message.contains(QStringLiteral("invalid authentication credentials"), Qt::CaseInsensitive)
+                    || message.contains(QStringLiteral("Expected OAuth 2 access token"), Qt::CaseInsensitive)
+                    || message.contains(QStringLiteral("missing required authentication"), Qt::CaseInsensitive)
+                    || message.contains(QStringLiteral("invalid_token"), Qt::CaseInsensitive)
+                    || message.contains(QStringLiteral("UNAUTHENTICATED"), Qt::CaseInsensitive));
+            if ((authFailureCode || authFailureLikelyByMessage) && !m_youtubeAuthRefreshPending) {
+                m_youtubeAuthRefreshPending = true;
+                m_txtEventLog->append(QStringLiteral("[YT-AUTH-401] %1: requesting token refresh")
+                    .arg(normalizedInnerCode));
+                if (!m_tokenManager.requestImmediateRefresh(PlatformId::YouTube)) {
+                    m_youtubeAuthRefreshPending = false;
+                }
+            }
         }
         if (!normalizedInnerCode.startsWith(QStringLiteral("TRACE_")) && !normalizedInnerCode.startsWith(QStringLiteral("INFO_"))) {
             setPlatformRuntimeError(platform, innerCode, message);
@@ -1076,6 +1102,9 @@ void MainWindow::connectTokenManagerSignals()
         this, [this](PlatformId p, TokenState, const TokenRecord&, const QString&) { refreshPlatformIndicator(p); });
     connect(&m_tokenManager, &TokenManager::tokenUpdated,
         this, &MainWindow::applyRuntimeAccessTokenToAdapter);
+    // H1-A — token refresh 완료 후 viewer-count 401 재시도 트리거.
+    connect(&m_tokenManager, &TokenManager::tokenUpdated,
+        this, &MainWindow::onYouTubeTokenUpdatedForViewerRetry);
     connect(&m_tokenManager, &TokenManager::profileSyncNeeded,
         this, [this](PlatformId p, const QString& token) {
             if (p == PlatformId::YouTube) syncYouTubeProfileFromAccessToken(token);
@@ -2069,6 +2098,13 @@ void MainWindow::setLiveBroadcastState(PlatformId platform, LiveBroadcastState s
         updateViewerCount(PlatformId::Chzzk, -1);
     }
 
+    // F2 — state 전이 직후 라벨 즉시 갱신.
+    // formatCount 가 platform-state 를 보므로 ONLINE↔non-ONLINE 전이 시 "—" ↔ "?" 변경이
+    // 다음 polling tick (최대 15s) 까지 지연되는 것을 방지.
+    if (previous != state) {
+        refreshViewerCountDisplay();
+    }
+
 #ifdef ONIONMIXERCHATMANAGER_BROADCHAT_SERVER_ENABLED
     // PLAN §6.4.5 platform_status broadcast.
     if (m_broadChatServer) {
@@ -2346,6 +2382,30 @@ void MainWindow::applyRuntimeAccessTokenToAdapter(PlatformId platform, const QSt
     adapter->applyRuntimeAccessToken(accessToken);
 }
 
+// H1-A / H1-B — token refresh 완료 시점에 펜딩 플래그 클리어 + viewer-count 재발신.
+// pending flag 가 true 일 때만 동작하므로 일반 token refresh 와 충돌 없음.
+// H1-B 의 discovery 재시도는 명시 호출 없이 adapter polling cycle 이 자연 회복.
+void MainWindow::onYouTubeTokenUpdatedForViewerRetry(PlatformId platform, const QString& accessToken)
+{
+    if (platform != PlatformId::YouTube) return;
+
+    // H1-B: discovery / chat poll 401 펜딩 클리어 (refresh 성공 신호).
+    if (m_youtubeAuthRefreshPending) {
+        m_youtubeAuthRefreshPending = false;
+        m_txtEventLog->append(QStringLiteral("[YT-AUTH-401] youtube: token refreshed; "
+                                              "discovery will recover on next tick"));
+    }
+
+    // H1-A: viewer-count 401 재시도.
+    if (m_youtubeViewerCountRefreshPending) {
+        m_youtubeViewerCountRefreshPending = false;
+        if (!accessToken.trimmed().isEmpty()) {
+            m_txtEventLog->append(QStringLiteral("[VIEWER-401] youtube: retrying viewer-count after refresh"));
+            requestYouTubeViewerCount();
+        }
+    }
+}
+
 void MainWindow::onPlatformConfigValidationRequested(PlatformId platform, const PlatformSettings& settings)
 {
     bool ok = !settings.clientId.trimmed().isEmpty() && !settings.redirectUri.trimmed().isEmpty() && !settings.scope.trimmed().isEmpty();
@@ -2407,6 +2467,32 @@ void MainWindow::requestYouTubeViewerCount()
             return;
         }
 
+        // H1-A — 401 (토큰 만료) 검출 시 자동 refresh + 단일 재시도.
+        // FIX_YOUTUBE_COUNTER.md §6 H1-A 참고. preemptive refresh (H2) 가 만료 cliff 를
+        // 사전 차단하지만 시계 차이·refresh 실패 등 안전망으로 본 분기 유지.
+        // 재발신은 영구 연결된 onYouTubeTokenUpdatedForViewerRetry() 가
+        // m_youtubeViewerCountRefreshPending flag 를 보고 처리.
+        const int httpStatus = reply->attribute(
+            QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (httpStatus == 401 && !m_youtubeViewerCountRefreshPending) {
+            m_youtubeViewerCountRefreshPending = true;
+            m_txtEventLog->append(QStringLiteral("[VIEWER-401] youtube: requesting token refresh"));
+            if (!m_tokenManager.requestImmediateRefresh(PlatformId::YouTube)) {
+                // refresh 시작 실패 (이미 진행 중 등). pending 풀고 일반 -1 처리.
+                m_youtubeViewerCountRefreshPending = false;
+            }
+            reply->deleteLater();
+            return;
+        }
+        if (httpStatus >= 400) {
+            // 401 외 4xx/5xx — refresh 로 회복 못함. 진단 로그 + miss 처리.
+            m_txtEventLog->append(QStringLiteral("[VIEWER-HTTP-ERR] youtube: status=%1")
+                .arg(httpStatus));
+            updateViewerCount(PlatformId::YouTube, -1);
+            reply->deleteLater();
+            return;
+        }
+
         const QByteArray body = reply->readAll();
         QJsonObject obj;
         const QJsonDocument doc = QJsonDocument::fromJson(body);
@@ -2431,19 +2517,38 @@ void MainWindow::requestYouTubeViewerCount()
 
 void MainWindow::updateViewerCount(PlatformId platform, int count)
 {
-    // ①②④: YouTube는 연속 결측 히스테리시스·통계 누적·fresh 타임스탬프 관리.
-    // CHZZK는 현재 별도 폴링이 아니라 외부 이벤트로 갱신되므로 기존 동작 유지.
+    // F1 — sticky-retain (FIX_YOUTUBE_COUNTER.md §6 F1).
+    // YouTube 의 m_youtubeViewerCount 의 의미를 "마지막 값" 에서
+    // "LiveBroadcastState==ONLINE 인 동안 유지되는 마지막 유효값" 으로 재정의.
+    // ONLINE + lastFreshAt 유효 시 chronic miss(예: cause ① concurrentViewers 누락) 동안엔
+    // 값 유지. ONLINE 외 / 초기 미수신 시엔 placeholder 표시.
+    // CHZZK 는 외부 이벤트 기반 갱신이라 기존 동작 유지.
     if (platform == PlatformId::YouTube) {
         ++m_youtubeViewerTotalTicks;
         if (count < 0) {
             ++m_youtubeViewerMissTotal;
-            ++m_youtubeViewerMissStreak;
+            // B2 해결: streak 를 grace 에서 clamp (무한 ++ 방지).
             if (m_youtubeViewerMissStreak < OnionmixerChatManager::Viewers::kYouTubeViewerMissGraceCount) {
-                // 마지막 유효값 유지 — tooltip만 다시 그려 stale 표기 갱신.
+                ++m_youtubeViewerMissStreak;
+            }
+
+            const LiveBroadcastState live =
+                m_liveStates.value(PlatformId::YouTube, LiveBroadcastState::UNKNOWN);
+
+            // sticky 분기: ONLINE + 과거 유효값 1회 이상 받은 적 있으면 값 유지.
+            // F2 (refreshViewerCountDisplay 의 platform-aware formatCount) 가
+            // tooltip 의 stale 시간을 표시.
+            if (live == LiveBroadcastState::ONLINE && m_youtubeViewerLastFreshAt.isValid()) {
                 refreshViewerCountDisplay();
                 return;
             }
-            // grace 초과 → 실제 placeholder 전환.
+
+            // 그 외 (OFFLINE / UNKNOWN / ERROR / 초기 미수신) — placeholder 로 전환.
+            if (m_youtubeViewerCount != -1) {
+                m_youtubeViewerCount = -1;
+            }
+            refreshViewerCountDisplay();
+            return;
         } else {
             m_youtubeViewerMissStreak = 0;
             m_youtubeViewerLastFreshAt = QDateTime::currentDateTime();
@@ -2464,15 +2569,27 @@ void MainWindow::refreshViewerCountDisplay()
 {
     if (!m_lblYouTubeViewers || !m_lblChzzkViewers || !m_lblTotalViewers) return;
 
-    auto formatCount = [](int count) -> QString {
-        if (count < 0) return QStringLiteral("\u2014");
-        return QLocale().toString(count);
+    // F2 \u2014 platform-aware formatCount.
+    //   count >= 0 : \uc2e4\uc81c \uc22b\uc790
+    //   count <  0 + state == ONLINE : "?" (\ub77c\uc774\ube0c \uc9c4\ud589 \uc911\uc778\ub370 \uc2dc\uccad\uc790 \uc218\ub9cc \ubbf8\uacf5\uac1c\u00b7\ubbf8\uc218\uc2e0)
+    //   count <  0 + \uadf8 \uc678 state     : "\u2014" (\ub77c\uc774\ube0c \uc790\uccb4 \uaebc\uc9d0 / \uc5f0\uacb0 \uc548 \ub428)
+    // YouTube/CHZZK \uc591\ucabd\uc5d0 \ud638\ucd9c\ub418\ubbc0\ub85c platform \uc778\uc790\ub85c \ub77c\uc774\ube0c state \ub97c \ubd84\uae30.
+    auto formatCount = [this](PlatformId platform, int count) -> QString {
+        if (count >= 0) return QLocale().toString(count);
+        const LiveBroadcastState live =
+            m_liveStates.value(platform, LiveBroadcastState::UNKNOWN);
+        if (live == LiveBroadcastState::ONLINE) {
+            return QStringLiteral("?");
+        }
+        return QStringLiteral("\u2014");
     };
 
     m_lblYouTubeViewers->setText(QStringLiteral("%1 %2")
-        .arg(PlatformTraits::badgeSymbol(PlatformId::YouTube), formatCount(m_youtubeViewerCount)));
+        .arg(PlatformTraits::badgeSymbol(PlatformId::YouTube),
+             formatCount(PlatformId::YouTube, m_youtubeViewerCount)));
     m_lblChzzkViewers->setText(QStringLiteral("%1 %2")
-        .arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk), formatCount(m_chzzkViewerCount)));
+        .arg(PlatformTraits::badgeSymbol(PlatformId::Chzzk),
+             formatCount(PlatformId::Chzzk, m_chzzkViewerCount)));
 
     // ②④: YouTube 시청자 tooltip — 마지막 fresh 시점·연속 결측·누적 miss rate.
     // concurrentViewers 필드가 YouTube 측에서 간헐적으로 빠지는 특성을 사용자·지원 담당자

@@ -17,6 +17,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the 
 
 ### Changed
 
+- **YouTube OAuth 토큰 자동 refresh + 시청자 카운터 영구 락 해소** (`FIX_YOUTUBE_COUNTER.md`) — root cause 가 OAuth 액세스 토큰 만료(≈1h cliff)로 확정. 채팅은 InnerTube WebChat(공개 API key) 으로 계속 들어와 사용자가 만료를 인지 못한 채 라이브 디스커버리·시청자 카운터(REST + OAuth) 만 401 영구 락에 빠지던 결함:
+  - **H2 — preemptive refresh** (`TokenManager`): `accessExpireAtUtc` 기준 만료 60s 전 per-platform 단일 `QTimer` 가 silent refresh 발동. `onTokenGranted`·`tryStartupTokenRefresh` VALID 분기에서 자동 (재)예약, `onTokenDeleteRequested`·`onTokenRevoked` 시 cancel. 만료 cliff 자체 차단.
+  - **H1-A — viewer-count 401 자동 회복** (`MainWindow::requestYouTubeViewerCount`): reply 람다에 `httpStatus == 401` 분기 추가 → `TokenManager::requestImmediateRefresh()` 호출 + `m_youtubeViewerCountRefreshPending` flag 게이팅 + `tokenUpdated` 영구 슬롯에서 1회 재발신. 시계 차이·refresh 실패 등 H2 안전망. 401 외 4xx/5xx 진단 로그 추가.
+  - **H1-B — live discovery 401 자동 회복** (`MainWindow::onWarningRaised`): `YT_STREAM_UNAUTHENTICATED`·`YT_STREAM_TOKEN_MISSING` 명시 코드 + `LIVE_DISCOVERY_FAILED`·`CHAT_POLL_FAILED` 메시지 휴리스틱(`invalid authentication credentials`/`Expected OAuth 2 access token`/`UNAUTHENTICATED` 등) → `requestImmediateRefresh()` 호출. adapter 의 polling cycle 이 자연 회복하므로 별도 retry 불필요.
+  - **F1 — viewer counter sticky-retain**: `m_youtubeViewerCount` 의 의미를 "ONLINE 동안 유지되는 마지막 유효값" 으로 재정의. cause ① (Google `concurrentViewers` 저시청자 누락) 같은 chronic miss 시에도 마지막 값 유지. streak 가 grace 에서 clamp 되어 무한 ++ 방지.
+  - **F2 — `?` 구분 표시**: `formatCount` lambda 가 platform-aware 시그니처로 변경. ONLINE 인데 수치 미수신이면 `?` (Google 누락·broadcaster 비공개), 그 외엔 `—`. CHZZK 라벨 오염 방지. state 전이 시 `refreshViewerCountDisplay()` 즉시 호출로 15s 폴링 윈도우 동안 stale 표시 회피.
+  - 관련 파일: `src/auth/TokenManager.{h,cpp}`, `src/ui/MainWindow.{h,cpp}`, `FIX_YOUTUBE_COUNTER.md`
+
 - **YouTube 시청자 카운터 안정화** — 라벨 깜박임("—" flicker) 완화. YouTube Data API v3 `videos.list?part=liveStreamingDetails`의 `concurrentViewers` 필드는 저시청자·라이브 경계 구간에서 간헐적으로 누락되는데, 기존에는 결측 1회에 즉시 placeholder로 전환했음. 4가지 개선 혼합:
   - **Miss-grace 히스테리시스** — 연속 결측 `kYouTubeViewerMissGraceCount=3` (≈45s) 미만이면 마지막 유효값 유지
   - **Stale tooltip** — 라벨 tooltip에 API 설명·fresh/stale 경과초·miss streak·누적 miss rate% 표기

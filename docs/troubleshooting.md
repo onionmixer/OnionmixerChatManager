@@ -172,26 +172,31 @@ chmod 0600 config/app.ini config/tokens.ini
 ls -l config/  # rw------- 확인
 ```
 
-## 9. YouTube 시청자 카운터 깜박임 ("—" flicker)
+## 9. YouTube 시청자 카운터 영구 락 / 깜박임 ("—" flicker, "?" 표시)
 
 ### 증상
 
-- YouTube 라이브 방송 중인데 시청자 수가 **값 ↔ "—"** 를 반복
-- 수치가 간헐적으로 0/공백으로 꺾였다가 복구
+- YouTube 라이브 방송 중인데 시청자 수가 **값 ↔ "—"** 를 반복 (간헐 flicker)
+- **시간이 지나면 영구히 "—" 또는 "?"** 로 락 (라이브 상태 인디케이터도 "미확인" 동반)
+- 채팅은 계속 들어오는데 시청자 카운터·라이브 상태만 죽음
 
-### 원인
+### 원인 — 두 가지 root cause
 
-YouTube Data API v3 `videos.list?part=liveStreamingDetails` 호출이 반환하는
-`concurrentViewers` 필드는 Google 측 집계 캐시의 근사값으로, **저시청자 구간·라이브
-경계(시작/종료) 근처**에서 필드 자체가 누락되는 경우가 있음. 메인 앱은 15초 간격으로
-폴링하므로 결측 tick이 바로 UI에 노출되면 깜박임처럼 보임.
+**(A) OAuth 액세스 토큰 만료 (≈1h cliff) — `FIX_YOUTUBE_COUNTER.md` 의 cause ②**
 
-v0.1.0 이후(Unreleased): 4중 완화 적용 — 연속 결측 3회(≈45s) 미만은 마지막 값 유지,
-tooltip으로 상태 표기, 방송 종료(OFFLINE)만 즉시 리셋.
+YouTube 채팅 수신은 InnerTube WebChat 의 공개 `INNERTUBE_API_KEY` 로 동작하므로 OAuth 토큰 만료에 무관 → 채팅은 계속 들어옴. 그러나 **라이브 디스커버리(`liveBroadcasts.list`/`videos.list`/`search.list`) 와 시청자 카운터(`videos.list?part=liveStreamingDetails`) 는 OAuth Bearer 필수** → 401 영구 실패 → "미확인" + "—" 영구 락.
+
+**v0.1.0 이후(Unreleased)**: 자동 refresh 도입 — 만료 60s 전 preemptive refresh + 401 수신 시 즉시 refresh + 1회 재시도. 사용자 무개입 회복.
+
+**(B) `concurrentViewers` 필드 누락 — `FIX_YOUTUBE_COUNTER.md` 의 cause ①**
+
+YouTube Data API v3 `videos.list?part=liveStreamingDetails` 의 `concurrentViewers` 필드는 Google 측 집계 캐시의 근사값으로, **저시청자 구간·라이브 경계(시작/종료) 근처** 에서 필드 자체가 누락. HTTP 200 으로 응답하지만 필드만 빠진 상태. 시청자 1~2명 라이브에서 chronic 발생 가능.
+
+**v0.1.0 이후(Unreleased)**: sticky-retain — ONLINE 동안 마지막 유효값 유지. 첫 수신 전이거나 broadcaster 가 시청자 수 비공개 설정한 경우 `?` 로 구분 표시.
 
 ### 진단
 
-YouTube 라벨 위에 **마우스 hover** → tooltip에서 현재 상태 확인:
+YouTube 라벨 위에 **마우스 hover** → tooltip 에서 현재 상태 확인:
 
 ```
 YouTube viewers (via Data API v3 concurrentViewers, polled every 15s)
@@ -203,23 +208,40 @@ Miss rate: 3.4% (12/350 ticks)         ← 누적 결측 비율
 - `Fresh: Ns ago` → 정상 폴링
 - `Stale: last fresh Ns ago` → 20초 이상 신규 값 없음
 - `Miss streak: X / 3` → 연속 결측 누적 (≥3이면 placeholder 전환)
-- `Miss rate`가 10% 이상이면 YouTube 측 캐시 이슈 지속 가능성 — 방송 자체에는 문제 없음
+- `Miss rate` 가 10% 이상이면 YouTube 측 캐시 이슈 지속 가능성 — 방송 자체에는 문제 없음
+
+또한 **이벤트 로그** 확인:
+- `[YT-AUTH-401]` / `[VIEWER-401]` / `[TOKEN-AUTO-REFRESH-FIRE]` → cause (A) 자동 회복 동작 중
+- `[LIVE] youtube state=미확인 detail=토큰을 사용할 수 없어 ...` 가 반복되며 `[TOKEN-AUTO-REFRESH-*]` 가 안 보임 → preemptive timer 가 어떤 이유로 미작동 (refresh token 자체 만료 가능성)
+
+### 표시 구분 (v0.1.0 이후)
+
+| 표시 | 의미 |
+|------|------|
+| 숫자 | 정상 — 마지막 fresh 값 |
+| `?` | 라이브 진행 중인데 시청자 수 미공개·미수신. **방송 자체에는 이상 없음**. Google 누락(저시청자) 또는 broadcaster Studio 비공개 설정 |
+| `—` | 라이브 자체 꺼짐 (OFFLINE) 또는 연결 안 됨 (UNKNOWN/CHECKING/ERROR) |
 
 ### 대응
 
 | 케이스 | 해결 |
 |--------|------|
 | `Miss rate < 5%`, 간헐 flicker | **정상 범위**. 추가 조치 불필요 |
-| `Miss rate > 20%`, 지속 | YouTube quota/API 상태 확인 ([status.cloud.google.com](https://status.cloud.google.com)). 토큰 재발급 고려 |
-| `Stale N > 60s` | 토큰 만료·네트워크 단절. Configuration 창에서 토큰 재인증 |
+| `Miss rate > 20%`, 지속 | YouTube quota/API 상태 확인 ([status.cloud.google.com](https://status.cloud.google.com)) |
+| 표시가 `?` 로 영구 | broadcaster 가 시청자 수 비공개 설정했거나 저시청자 라이브 — Studio 설정 확인 |
+| 표시가 `—` 영구 + 라이브 상태 "미확인" | cause (A) — 자동 refresh 가 작동 중인지 이벤트 로그에서 `[YT-AUTH-401]` / `[VIEWER-401]` / `[TOKEN-AUTO-REFRESH-*]` 확인. 안 보이면 Configuration → YouTube → `Token Refresh` 또는 `Re-Auth Browser` |
+| `Re-Auth Browser` 도 실패 | refresh token 자체 만료 (≥7일 미사용 또는 OAuth consent screen Testing 모드) — Google Cloud Console 의 OAuth 설정 점검 |
 | 방송 종료 즉시 "—" | **정상 동작** (OFFLINE 확정 시 hysteresis 우회) |
-| 방송 중인데 장시간 "—" | Live probe가 OFFLINE/UNKNOWN 오판정 가능성. 이벤트 로그 `[LIVE] YouTube state=...` 확인 |
 
 ### 관련 코드
 
-- `src/ui/MainWindow.cpp:requestYouTubeViewerCount` — API 폴링
-- `src/ui/MainWindow.cpp:updateViewerCount` — 히스테리시스 분기
+- `src/ui/MainWindow.cpp:requestYouTubeViewerCount` — API 폴링 + H1-A 401 자동 refresh
+- `src/ui/MainWindow.cpp:updateViewerCount` — F1 sticky-retain
+- `src/ui/MainWindow.cpp:refreshViewerCountDisplay` — F2 platform-aware formatCount
+- `src/ui/MainWindow.cpp:onWarningRaised` — H1-B 401 검출 + refresh 트리거
+- `src/auth/TokenManager.cpp:scheduleNextRefresh` — H2 preemptive refresh 타이머
 - `src/core/Constants.h` — `Viewers::kYouTubeViewerMissGraceCount=3`, `kYouTubeViewerStaleThresholdMs=20000`
+- 자세한 분석·설계: 저장소 루트의 `FIX_YOUTUBE_COUNTER.md`
 
 ## 10. 공용 Wi-Fi·WAN 노출 경고
 

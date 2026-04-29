@@ -78,6 +78,9 @@ private slots:
     void onComposerHistoryPrevRequested();
     void onComposerHistoryNextRequested();
     void onLiveProbeTimeout();
+    // H1-A — viewer-count 401 발생 후 token refresh 가 완료되면 viewer-count 재발신.
+    // 영구 슬롯이며 m_youtubeViewerCountRefreshPending flag 로 게이팅.
+    void onYouTubeTokenUpdatedForViewerRetry(PlatformId platform, const QString& accessToken);
 
 private:
     void setupUi();
@@ -179,6 +182,12 @@ private:
     QDateTime m_youtubeViewerLastFreshAt;       // 마지막 유효값 수신 시각 (tooltip용)
     qint64 m_youtubeViewerMissTotal = 0;        // 누적 결측 tick
     qint64 m_youtubeViewerTotalTicks = 0;       // 누적 polling tick (결측·성공 합)
+    // H1-A — viewer-count API 가 401 받았을 때 단일 in-flight refresh 보장.
+    // tokenUpdated 도착 시 재시도 1회 발신. 재진입 폭주 방지.
+    bool m_youtubeViewerCountRefreshPending = false;
+    // H1-B — live discovery / chat poll 의 401 검출 시 단일 in-flight refresh 보장.
+    // tokenUpdated 시 클리어. 별도 retry 불필요 (adapter 자체 polling cycle 이 회복).
+    bool m_youtubeAuthRefreshPending = false;
     QTimer* m_apiStatusReconcileTimer = nullptr;
     QDateTime m_nextPeriodicChzzkProbeAtUtc;
     bool m_awaitingChzzkLiveProbe = false;
