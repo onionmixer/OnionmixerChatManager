@@ -527,10 +527,19 @@ if (WIN32)
         # grpc 는 vcpkg port 가 static 빌드 → 메인 exe 에 통합 (별도 DLL 없음).
         # zlib 는 vcpkg 가 z.dll 으로 export — 일반 zlib1.dll 명명과 다름. 둘 다
         # 커버 (미래 vcpkg 정책 변경 대비).
+        #
+        # PATTERN ... EXCLUDE 는 source directory traversal 자체를 막는다 (CMake
+        # docs: "the option will exclude that directory and its contents"):
+        #   - _CPack_Packages : cpack 자체 산출 디렉토리. 안 막으면 install 이
+        #     자기 destination 을 source 로 다시 매치 → 무한 재귀 디렉토리 생성.
+        #   - vcpkg_installed : vcpkg manifest install 의 dual (dbg+rel) 산출.
+        #     안 막으면 debug DLL 까지 잘못 매치되거나 traversal 비용 증가.
         install(DIRECTORY "$<TARGET_FILE_DIR:OnionmixerChatManagerQt5>/"
             DESTINATION bin
             COMPONENT client
             FILES_MATCHING
+                PATTERN "_CPack_Packages" EXCLUDE
+                PATTERN "vcpkg_installed" EXCLUDE
                 REGEX "(libprotobuf.*\\.dll|libprotoc.*\\.dll|grpc.*\\.dll|gpr.*\\.dll|address_sorting\\.dll|upb.*\\.dll|abseil_dll\\.dll|absl_.*\\.dll|cares\\.dll|re2\\.dll|/z\\.dll|zlib1?\\.dll|libcrypto-3-x64\\.dll|libssl-3-x64\\.dll|libssl-1_1-x64\\.dll|libcrypto-1_1-x64\\.dll)$")
     endif()
 endif()
